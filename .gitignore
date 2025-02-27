@@ -1,0 +1,22 @@
+# Ignore Python virutal environment
+venv/
+myenv/
+
+# Ignore compiled Python files
+__pycache__/
+*.pyc
+*.pyo
+
+# Ignore API keys and config files
+config.py
+
+# Ignore logs and cache
+*.log/
+logs/
+*.tmp
+temp/
+
+# Ignore OS and editor-specific files
+.DS_Store
+.idea/
+.vscode/
