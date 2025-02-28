@@ -1,10 +1,12 @@
+import sys
 import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 import requests
 import msal
-from config import CLIENT_ID, CLIENT_SECRET, TENANT_ID
+from config import CLIENT_ID, CLIENT_SECRET, TENANT_ID, EMAIL_ADDRESS
 
 # Microsoft OAuth Endpoints
-AUTHORITY = f"https://login.microsoftonline.com/{TENANT_ID}"
+AUTHORITY = "https://login.microsoftonline.com/consumers"
 SCOPES = ["https://graph.microsoft.com/.default"]
 
 # Directory for saving attachments
@@ -25,9 +27,11 @@ def get_unread_emails():
     """Fetch unread emails from Outlook using Microsoft Graph API."""
     access_token = get_access_token()
     headers = {"Authorization": f"Bearer {access_token}"}
+
+    url = f"https://graph.microsoft.com/v1.0/users/{EMAIL_ADDRESS}/messages?$filter=isRead eq false"
     
     response = requests.get(
-        "https://graph.microsoft.com/v1.0/me/messages?$filter=isRead eq false",
+        url,
         headers=headers
     )
     
