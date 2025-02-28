@@ -1,6 +1,7 @@
 from modules.speech import SpeechModule
 from modules.nlp import NLPModule
 from modules.weather import get_weather
+from modules.email_handler import get_unread_emails
 
 def main():
     assistant = SpeechModule()
@@ -23,17 +24,10 @@ def main():
         else:
             assistant.speak("No escuché ninguna ciudad. Intenta de nuevo.")
 
-    elif intent == "tasks":
-        if entities:
-            assistant.speak(f"Anotaré la siguiente tarea: {', '.join(entities.values())}")
-        else:
-            assistant.speak("¿Qué tarea quieres que anote?")
-    
     elif intent == "email":
-        assistant.speak("Puedo ayudarte con tus correos electrónicos.")
-
-    elif intent == "calendar":
-        assistant.speak("Voy a revisar tu calendario.")
+        assistant.speak("Voy a revisar tu bandeja de entrada.")
+        emails = get_unread_emails()
+        assistant.speak(emails)
 
     else:
         assistant.speak("Lo siento, no entendí eso.")
