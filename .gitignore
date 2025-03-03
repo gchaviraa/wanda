@@ -20,3 +20,7 @@ temp/
 .DS_Store
 .idea/
 .vscode/
+
+# Ignore google cloud credentials
+credentials.json
+token.pickle
