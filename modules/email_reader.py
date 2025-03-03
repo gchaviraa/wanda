@@ -40,7 +40,7 @@ def fetch_unread_emails():
         return "No tienes correos electrónicos sin leer."
 
     email_list = []
-    for msg in messages[:5]:  # Get latest 5 unread emails
+    for msg in messages[:3]:  # Get latest 3 unread emails
         msg_data = service.users().messages().get(userId="me", id=msg["id"]).execute()
         payload = msg_data.get("payload", {})
         headers = payload.get("headers", [])
