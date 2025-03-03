@@ -55,8 +55,15 @@ def main():
             assistant.speak("Dime el mensaje del correo.")
             message = assistant.listen()
 
-            result = send_email(recipient_email, subject, message)
-            assistant.speak(result)
+            # ✅ Ask for confirmation before sending
+            assistant.speak(f"Vas a enviar un correo a {recipient_name} con el asunto {subject}. El mensaje dice: {message}. ¿Quieres enviarlo ahora?")
+            confirmation = assistant.listen()
+
+            if "sí" in confirmation.lower():
+                result = send_email(recipient_email, subject, message)
+                assistant.speak(result)
+            else:
+                assistant.speak("Correo cancelado.")
 
     elif intent == "contacts":
         assistant.speak("Estos son tus contactos guardados.")
