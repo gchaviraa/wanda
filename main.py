@@ -1,7 +1,7 @@
 from modules.speech import SpeechModule
 from modules.nlp import NLPModule
 from modules.weather import get_weather
-from modules.email_handler import fetch_unread_emails
+from modules.email_reader import fetch_unread_emails
 
 def main():
     assistant = SpeechModule()
