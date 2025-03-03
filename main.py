@@ -1,7 +1,7 @@
 from modules.speech import SpeechModule
 from modules.nlp import NLPModule
 from modules.weather import get_weather
-from modules.email_handler import get_unread_emails
+from modules.email_handler import fetch_unread_emails
 
 def main():
     assistant = SpeechModule()
@@ -26,11 +26,11 @@ def main():
 
     elif intent == "email":
         assistant.speak("Voy a revisar tu bandeja de entrada.")
-        emails = get_unread_emails()
-        assistant.speak(emails)
-
-    else:
-        assistant.speak("Lo siento, no entendí eso.")
+        emails = fetch_unread_emails()
+        if emails.strip():  # Ensure Wanda doesn't read empty space
+            assistant.speak(emails)
+        else:
+            assistant.speak("No tienes correos electrónicos sin leer.")
 
 if __name__ == "__main__":
     main()
