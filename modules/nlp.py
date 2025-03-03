@@ -10,7 +10,8 @@ class NLPModule:
             "weather": ["clima", "tiempo", "temperatura", "frío", "calor", "lluvia", "soleado"],
             "tasks": ["tarea", "recordatorio", "anotar", "recuérdame", "apunta", "pendiente", "hacer", "comprar"],
             "email": ["correo", "email", "mensaje", "bandeja", "enviar"],
-            "calendar": ["evento", "reunión", "calendario", "cita", "agenda", "programar"]
+            "calendar": ["evento", "reunión", "calendario", "cita", "agenda", "programar"],
+            "contacts": ["contacto", "contactos", "agenda", "guardar", "lista"]
         }
 
     def analyze(self, text):
@@ -19,11 +20,10 @@ class NLPModule:
         tokens = [token.lemma_.lower() for token in doc]  # Lemmatized words
         entities = {ent.label_: ent.text for ent in doc.ents}  # Named entities
 
-        # Custom entity extraction for objects (like "comprar leche")
-        for i, token in enumerate(doc):
-            if token.lemma_ in ["comprar", "recordar", "anotar"]:  # If it's a task-related verb
-                if i + 1 < len(doc):  # Check if there’s a next word
-                    entities["TASK_ITEM"] = doc[i + 1].text  # Capture the next word as an entity
+        # Detect proper names (PERSON entities) to use as CONTACT_NAME
+        for ent in doc.ents:
+            if ent.label_ == "PER":  # 'PER' is the spaCy label for Person Names in Spanish
+                entities["CONTACT_NAME"] = ent.text
 
         return tokens, entities
 
@@ -36,19 +36,3 @@ class NLPModule:
                 return intent, entities
 
         return "unknown", entities
-
-# Testing
-if __name__ == "__main__":
-    nlp = NLPModule()
-    
-    test_sentences = [
-        "¿Cómo está el clima hoy?",  # Should detect "weather"
-        "Recuérdame comprar leche.",  # Should detect "tasks" + recognize "leche"
-        "¿Tengo correos nuevos?",  # Should detect "email"
-        "¿Cuándo es mi próxima reunión?",  # Should detect "calendar"
-        "Cántame una canción."  # Should return "unknown"
-    ]
-
-    for sentence in test_sentences:
-        intent, entities = nlp.get_intent(sentence)
-        print(f"📝 Entrada: {sentence} \n🎯 Intento: {intent} \n📌 Entidades: {entities}\n")
