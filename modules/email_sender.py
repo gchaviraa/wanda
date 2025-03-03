@@ -14,7 +14,7 @@ def send_email(to, subject, message_body):
 
     try:
         send_message = service.users().messages().send(userId="me", body={"raw": raw_message}).execute()
-        return f"✅ Email enviado a {to} con ID: {send_message['id']}"
+        return f"✅ Email enviado a {to}"
     except Exception as e:
         return f"❌ Error al enviar correo: {str(e)}"
 
