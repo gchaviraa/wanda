@@ -25,19 +25,25 @@ def handle_email(assistant):
         send_email_flow(assistant)
 
 def send_email_flow(assistant):
-    """Handles the email sending process."""
-    assistant.speak("¿A quién quieres enviar el correo?")
-    recipient_name = assistant.listen()
+    """Handles the email sending process with multiple recipients."""
+    assistant.speak("¿A quién o a quiénes quieres enviar el correo?")
+    recipient_input = assistant.listen()
 
-    # Check contacts or ask for an email
-    recipient_email = get_email_from_name(recipient_name)
-    if not recipient_email:
-        assistant.speak(f"No tengo registrado a {recipient_name}. ¿Puedes decirme su correo electrónico?")
-        recipient_email = assistant.listen()
-        assistant.speak(f"¿Quieres guardar {recipient_email} como contacto para {recipient_name}?")
-        if "sí" in assistant.listen().lower():
-            add_contact(recipient_name, recipient_email)
-            assistant.speak(f"Contacto {recipient_name} guardado.")
+    # Check if multiple names were given
+    recipient_names = [name.strip() for name in recipient_input.split(" y ")]  # Supports "Juan y María"
+
+    recipient_emails = []
+    for name in recipient_names:
+        email = get_email_from_name(name)
+        if not email:
+            assistant.speak(f"No tengo registrado a {name}. ¿Puedes decirme su correo electrónico?")
+            email = assistant.listen()
+            assistant.speak(f"¿Quieres guardar {email} como contacto para {name}?")
+            if "sí" in assistant.listen().lower():
+                add_contact(name, email)
+                assistant.speak(f"Contacto {name} guardado.")
+
+        recipient_emails.append(email)
 
     # Get subject and message
     assistant.speak("¿Cuál es el asunto del correo?")
@@ -47,9 +53,12 @@ def send_email_flow(assistant):
     message = assistant.listen()
 
     # Confirm before sending
-    assistant.speak(f"Vas a enviar un correo a {recipient_name} con el asunto {subject}. El mensaje dice: {message}. ¿Quieres enviarlo ahora?")
+    email_list_str = ", ".join(recipient_emails)
+    assistant.speak(f"Vas a enviar un correo a {email_list_str} con el asunto {subject}. El mensaje dice: {message}. ¿Quieres enviarlo ahora?")
+    
     if "sí" in assistant.listen().lower():
-        assistant.speak(send_email(recipient_email, subject, message))
+        result = send_email(recipient_emails, subject, message)  # Pass list of recipients
+        assistant.speak(result)
     else:
         assistant.speak("Correo cancelado.")
 
