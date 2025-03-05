@@ -32,6 +32,7 @@ def handle_email(assistant):
     elif "enviar" in email_action:
         send_email_flow(assistant)
 
+# Helper method for send_email_flow
 def get_valid_input(assistant, prompt):
     """Keeps asking the user until a valid input is provided."""
     response = None
@@ -42,6 +43,7 @@ def get_valid_input(assistant, prompt):
             assistant.speak("No te escuché bien. Inténtalo de nuevo.")
     return response
 
+# Helper method for send_email_flow
 def get_recipient_emails(assistant):
     """Handles multiple recipients and ensures all emails are retrieved or entered."""
     recipient_names = get_valid_input(assistant, "¿A quién o a quiénes quieres enviar el correo?")
@@ -59,6 +61,7 @@ def get_recipient_emails(assistant):
 
     return recipient_emails
 
+# Helper method for send_email_flow
 def edit_email_content(assistant, subject, message):
     """Allows user to edit the subject or message before sending."""
     while True:
