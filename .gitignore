@@ -24,3 +24,6 @@ temp/
 # Ignore google cloud credentials
 credentials.json
 token.pickle
+
+# Ignore Wanda logs
+wanda.log
