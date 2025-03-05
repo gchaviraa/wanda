@@ -32,81 +32,65 @@ def handle_email(assistant):
     elif "enviar" in email_action:
         send_email_flow(assistant)
 
-def send_email_flow(assistant):
-    """Handles the email sending process with multiple recipients, re-asking for names, and editing before sending."""
-    assistant.speak("¿A quién o a quiénes quieres enviar el correo?")
-    
-    recipient_names = None
-    while not recipient_names:
-        recipient_input = assistant.listen().strip()
-        if recipient_input:
-            recipient_names = [name.strip() for name in recipient_input.split(" y ")]
-        else:
-            assistant.speak("No te escuché bien. ¿A quién quieres enviar el correo?")
+def get_valid_input(assistant, prompt):
+    """Keeps asking the user until a valid input is provided."""
+    response = None
+    while not response:
+        assistant.speak(prompt)
+        response = assistant.listen().strip()
+        if not response:
+            assistant.speak("No te escuché bien. Inténtalo de nuevo.")
+    return response
+
+def get_recipient_emails(assistant):
+    """Handles multiple recipients and ensures all emails are retrieved or entered."""
+    recipient_names = get_valid_input(assistant, "¿A quién o a quiénes quieres enviar el correo?")
+    recipient_names = [name.strip() for name in recipient_names.split(" y ")]
 
     recipient_emails = []
     for name in recipient_names:
         email = get_email_from_name(name)
         if not email:
-            assistant.speak(f"No tengo registrado a {name}. ¿Puedes decirme su correo electrónico?")
-            
-            email = None
-            while not email:
-                email = assistant.listen().strip()
-                if not email:
-                    assistant.speak("No escuché el correo, por favor repítelo.")
-
-            assistant.speak(f"¿Quieres guardar {email} como contacto para {name}?")
-            if "sí" in assistant.listen().lower():
+            email = get_valid_input(assistant, f"No tengo registrado a {name}. ¿Puedes decirme su correo electrónico?")
+            if "sí" in get_valid_input(assistant, f"¿Quieres guardar {email} como contacto para {name}?").lower():
                 add_contact(name, email)
                 assistant.speak(f"Contacto {name} guardado.")
-
         recipient_emails.append(email)
 
-    # Get subject and message
-    assistant.speak("¿Cuál es el asunto del correo?")
-    
-    subject = None
-    while not subject:
-        subject = assistant.listen().strip()
-        if not subject:
-            assistant.speak("No escuché el asunto. ¿Cuál es el asunto del correo?")
+    return recipient_emails
 
-    assistant.speak("Dime el mensaje del correo.")
-    
-    message = None
-    while not message:
-        message = assistant.listen().strip()
-        if not message:
-            assistant.speak("No escuché el mensaje. ¿Cuál es el contenido del correo?")
-
-    # ✅ Ask if the user wants to edit before sending
+def edit_email_content(assistant, subject, message):
+    """Allows user to edit the subject or message before sending."""
     while True:
-        assistant.speak(f"Vas a enviar un correo a {', '.join(recipient_emails)} con el asunto {subject}. El mensaje dice: {message}. ¿Quieres editar algo antes de enviarlo?")
-        edit_choice = assistant.listen().lower()
+        edit_choice = get_valid_input(assistant, f"Vas a enviar un correo con el asunto '{subject}'. El mensaje dice: {message}. ¿Quieres editar algo antes de enviarlo?")
 
         if "sí" in edit_choice:
-            assistant.speak("¿Quieres editar el asunto o el mensaje?")
-            edit_option = assistant.listen().lower()
-
+            edit_option = get_valid_input(assistant, "¿Quieres editar el asunto o el mensaje?").lower()
             if "asunto" in edit_option:
-                assistant.speak("Dime el nuevo asunto del correo.")
-                subject = assistant.listen().strip()
+                subject = get_valid_input(assistant, "Dime el nuevo asunto del correo.")
             elif "mensaje" in edit_option:
-                assistant.speak("Dime el nuevo contenido del correo.")
-                message = assistant.listen().strip()
+                message = get_valid_input(assistant, "Dime el nuevo contenido del correo.")
             else:
                 assistant.speak("No entendí qué quieres editar. Intenta de nuevo.")
-
         elif "no" in edit_choice:
-            break  # Exit the edit loop and proceed to sending
+            break  # Proceed with sending
+    return subject, message
 
-    # Confirm before sending
+def send_email_flow(assistant):
+    """Handles the email sending process with multiple recipients, re-asking for names, and editing before sending."""
+    recipient_emails = get_recipient_emails(assistant)
+    subject = get_valid_input(assistant, "¿Cuál es el asunto del correo?")
+    message = get_valid_input(assistant, "Dime el mensaje del correo.")
+
+    # Allow editing before sending
+    subject, message = edit_email_content(assistant, subject, message)
+
+    # Confirm and send email
     assistant.speak(f"Enviando correo a {', '.join(recipient_emails)} con el asunto '{subject}'.")
     result = send_email(recipient_emails, subject, message)
     assistant.speak(result)
 
-    # ✅ Log email sending action
+    # Log email sending action
     logging.info(f"Email sent to {', '.join(recipient_emails)} | Subject: {subject} | Message: {message}")
 
 def handle_contacts(assistant):
