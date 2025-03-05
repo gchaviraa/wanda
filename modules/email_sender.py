@@ -1,5 +1,6 @@
 from email.mime.text import MIMEText
 import base64
+import logging
 from modules.email_reader import authenticate_gmail  # Reuse authentication
 
 def send_email(to, subject, message_body):
@@ -17,8 +18,10 @@ def send_email(to, subject, message_body):
 
     try:
         send_message = service.users().messages().send(userId="me", body={"raw": raw_message}).execute()
+        logging.info(f"✅ Email sent to {to} | Subject: {subject}")  # ✅ Log success
         return f"✅ Email enviado a {to}"
     except Exception as e:
+        logging.error(f"❌ Error sending email to {to}: {str(e)}")  # ❌ Log failure
         return f"❌ Error al enviar correo: {str(e)}"
 
 # Test sending an email

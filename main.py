@@ -4,6 +4,14 @@ from modules.weather import get_weather
 from modules.email_reader import fetch_unread_emails
 from modules.email_sender import send_email
 from modules.contacts import get_email_from_name, add_contact, list_contacts  # Import contact functions
+import logging
+
+# Configure basic logging
+logging.basicConfig(
+    filename="wanda.log",  # Save logs to wanda.log
+    level=logging.INFO,  # Log important actions
+    format="%(asctime)s - %(levelname)s - %(message)s",  # Timestamp + level + message
+)
 
 def handle_weather(assistant):
     """Handles weather requests."""
@@ -25,14 +33,14 @@ def handle_email(assistant):
         send_email_flow(assistant)
 
 def send_email_flow(assistant):
-    """Handles the email sending process with multiple recipients and re-asking if Wanda doesn't hear a name."""
+    """Handles the email sending process with multiple recipients, re-asking for names, and editing before sending."""
     assistant.speak("¿A quién o a quiénes quieres enviar el correo?")
     
     recipient_names = None
-    while not recipient_names:  # Keep asking until Wanda hears something
+    while not recipient_names:
         recipient_input = assistant.listen().strip()
         if recipient_input:
-            recipient_names = [name.strip() for name in recipient_input.split(" y ")]  # Support "Juan y María"
+            recipient_names = [name.strip() for name in recipient_input.split(" y ")]
         else:
             assistant.speak("No te escuché bien. ¿A quién quieres enviar el correo?")
 
@@ -43,7 +51,7 @@ def send_email_flow(assistant):
             assistant.speak(f"No tengo registrado a {name}. ¿Puedes decirme su correo electrónico?")
             
             email = None
-            while not email:  # Keep asking until a valid email is provided
+            while not email:
                 email = assistant.listen().strip()
                 if not email:
                     assistant.speak("No escuché el correo, por favor repítelo.")
@@ -72,14 +80,34 @@ def send_email_flow(assistant):
         if not message:
             assistant.speak("No escuché el mensaje. ¿Cuál es el contenido del correo?")
 
+    # ✅ Ask if the user wants to edit before sending
+    while True:
+        assistant.speak(f"Vas a enviar un correo a {', '.join(recipient_emails)} con el asunto {subject}. El mensaje dice: {message}. ¿Quieres editar algo antes de enviarlo?")
+        edit_choice = assistant.listen().lower()
+
+        if "sí" in edit_choice:
+            assistant.speak("¿Quieres editar el asunto o el mensaje?")
+            edit_option = assistant.listen().lower()
+
+            if "asunto" in edit_option:
+                assistant.speak("Dime el nuevo asunto del correo.")
+                subject = assistant.listen().strip()
+            elif "mensaje" in edit_option:
+                assistant.speak("Dime el nuevo contenido del correo.")
+                message = assistant.listen().strip()
+            else:
+                assistant.speak("No entendí qué quieres editar. Intenta de nuevo.")
+
+        elif "no" in edit_choice:
+            break  # Exit the edit loop and proceed to sending
+
     # Confirm before sending
-    email_list_str = ", ".join(recipient_emails)
-    assistant.speak(f"Vas a enviar un correo a {email_list_str} con el asunto {subject}. El mensaje dice: {message}. ¿Quieres enviarlo ahora?")
-    
-    if "sí" in assistant.listen().lower():
-        assistant.speak(send_email(recipient_emails, subject, message))
-    else:
-        assistant.speak("Correo cancelado.")
+    assistant.speak(f"Enviando correo a {', '.join(recipient_emails)} con el asunto '{subject}'.")
+    result = send_email(recipient_emails, subject, message)
+    assistant.speak(result)
+
+    # ✅ Log email sending action
+    logging.info(f"Email sent to {', '.join(recipient_emails)} | Subject: {subject} | Message: {message}")
 
 def handle_contacts(assistant):
     """Handles contact listing."""
