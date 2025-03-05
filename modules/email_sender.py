@@ -3,8 +3,11 @@ import base64
 from modules.email_reader import authenticate_gmail  # Reuse authentication
 
 def send_email(to, subject, message_body):
-    """Sends an email using Gmail API."""
+    """Sends an email using Gmail API. Supports multiple recipients."""
     service = authenticate_gmail()
+
+    if isinstance(to, list):  # Convert list to comma-separated string if multiple recipients
+        to = ", ".join(to)
 
     # Create email message
     message = MIMEText(message_body)
