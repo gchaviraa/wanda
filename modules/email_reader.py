@@ -48,7 +48,7 @@ def fetch_unread_emails():
         subject = next((h["value"] for h in headers if h["name"] == "Subject"), "No Subject")
         sender = next((h["value"] for h in headers if h["name"] == "From"), "Unknown Sender")
 
-        email_text = f"📩 De: {sender}\n📌 Asunto: {subject}\n"
+        email_text = f"📩 De: {sender}\nAsunto: {subject}\n"
         email_list.append(email_text)
 
         # ✅ Mark email as read
