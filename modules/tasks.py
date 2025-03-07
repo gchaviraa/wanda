@@ -1,4 +1,4 @@
-from db import get_db_connection
+from modules.db import get_db_connection
 
 def add_task(name, due_date=None, priority="normal", reminder_time=None):
     conn = get_db_connection()
