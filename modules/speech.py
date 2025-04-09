@@ -31,18 +31,26 @@ class SpeechModule:
 
     def speak(self, text):
         """Convierte texto a voz usando gTTS y reproduce el audio con pygame."""
+        temp_file = None
         try:
             tts = gTTS(text, lang="es")
-            with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as temp_file:
-                tts.save(temp_file.name)
+            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")
+            tts.save(temp_file.name)
+            temp_file.close()
 
             pygame.mixer.music.load(temp_file.name)
             pygame.mixer.music.play()
 
-            # Esperar hasta que termine de reproducirse
             while pygame.mixer.music.get_busy():
                 pygame.time.Clock().tick(10)
 
-            os.remove(temp_file.name)
+            pygame.mixer.music.stop()
+
         except Exception as e:
             print(f"Error en la síntesis de voz: {e}")
+        finally:
+            if temp_file:
+                try:
+                    os.remove(temp_file.name)
+                except Exception as remove_error:
+                    print(f"No se pudo borrar el archivo temporal: {remove_error}")
