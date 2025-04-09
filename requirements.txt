@@ -38,6 +38,7 @@ mysql-connector-python==9.2.0
 numpy==2.2.3
 oauthlib==3.2.2
 packaging==24.2
+playsound==1.2.2
 preshed==3.0.9
 proto-plus==1.26.0
 protobuf==5.29.3
@@ -54,6 +55,7 @@ requests==2.32.3
 requests-oauthlib==2.0.0
 rich==13.9.4
 rsa==4.9
+schedule==1.2.2
 setuptools==75.8.2
 shellingham==1.5.4
 smart-open==7.1.0
