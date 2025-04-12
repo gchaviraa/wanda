@@ -8,7 +8,6 @@ class NLPModule:
         # Palabras clave agrupadas como sets para búsquedas más eficientes
         self.intents = {
             "weather": {"clima", "tiempo", "temperatura", "frío", "calor", "lluvia", "soleado"},
-            "tasks": {"tarea", "recordatorio", "anotar", "recuérdame", "apunta", "pendiente", "hacer", "comprar"},
             "email": {"correo", "email", "mensaje", "bandeja", "enviar"},
             "calendar": {"evento", "reunión", "calendario", "cita", "agenda", "programar"},
             "contacts": {"contacto", "contactos", "agenda", "guardar", "lista"}

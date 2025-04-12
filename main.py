@@ -3,7 +3,7 @@ from modules.nlp import NLPModule
 from modules.weather import get_weather
 from modules.email_reader import fetch_unread_emails
 from modules.email_sender import send_email
-from modules.contacts import get_email_from_name, add_contact, list_contacts  # Import contact functions
+from modules.contacts import get_email_from_name, add_contact, list_contacts
 import logging
 
 # Configure basic logging
