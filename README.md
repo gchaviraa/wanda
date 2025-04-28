@@ -25,7 +25,7 @@ Wanda es una asistente virtual personal desarrollada en Python que entiende tus 
 ### 1. Clona o descarga el proyecto
 
 ```bash
-git clone https://github.com/tuusuario/wanda.git
+git clone https://github.com/gchaviraa/wanda.git
 cd wanda
 ```
 
@@ -70,7 +70,7 @@ DB_CONFIG = {
     "host": "localhost",
     "user": "tu_usuario",
     "password": "tu_contraseña",
-    "database": "wanda_db"
+    "database": "tu_database"
 }
 
 WEATHER_API_KEY = "TU_API_KEY_DE_WEATHERAPI"
@@ -133,3 +133,8 @@ wanda/
 
 Este es un proyecto experimental para automatizar tareas por voz usando Python.  
 No está pensado para distribución o uso comercial.
+
+## 👨‍💻 Autor
+
+Desarrollado por [Gustavo Chavira](https://github.com/gchaviraa)   
+Proyecto hecho como asistente personal de voz en español.
