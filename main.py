@@ -4,13 +4,14 @@ from modules.weather import get_weather
 from modules.email_reader import fetch_unread_emails
 from modules.email_sender import send_email
 from modules.contacts import get_email_from_name, add_contact, list_contacts
+from modules.history import save_command 
 import logging
 
 # Configure basic logging
 logging.basicConfig(
-    filename="wanda.log",  # Save logs to wanda.log
-    level=logging.INFO,  # Log important actions
-    format="%(asctime)s - %(levelname)s - %(message)s",  # Timestamp + level + message
+    filename="wanda.log",
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s",
 )
 
 def handle_weather(assistant):
@@ -32,7 +33,6 @@ def handle_email(assistant):
     elif "enviar" in email_action:
         send_email_flow(assistant)
 
-# Helper method for send_email_flow
 def get_valid_input(assistant, prompt):
     """Keeps asking the user until a valid input is provided."""
     response = None
@@ -43,7 +43,6 @@ def get_valid_input(assistant, prompt):
             assistant.speak("No te escuché bien. Inténtalo de nuevo.")
     return response
 
-# Helper method for send_email_flow
 def get_recipient_emails(assistant):
     """Handles multiple recipients and ensures all emails are retrieved or entered."""
     recipient_names = get_valid_input(assistant, "¿A quién o a quiénes quieres enviar el correo?")
@@ -61,7 +60,6 @@ def get_recipient_emails(assistant):
 
     return recipient_emails
 
-# Helper method for send_email_flow
 def edit_email_content(assistant, subject, message):
     """Allows user to edit the subject or message before sending."""
     while True:
@@ -85,15 +83,12 @@ def send_email_flow(assistant):
     subject = get_valid_input(assistant, "¿Cuál es el asunto del correo?")
     message = get_valid_input(assistant, "Dime el mensaje del correo.")
 
-    # Allow editing before sending
     subject, message = edit_email_content(assistant, subject, message)
 
-    # Confirm and send email
     assistant.speak(f"Enviando correo a {', '.join(recipient_emails)} con el asunto '{subject}'.")
     result = send_email(recipient_emails, subject, message)
     assistant.speak(result)
 
-    # Log email sending action
     logging.info(f"Email sent to {', '.join(recipient_emails)} | Subject: {subject} | Message: {message}")
 
 def handle_contacts(assistant):
@@ -107,11 +102,13 @@ def main():
 
     assistant.speak("Hola, soy Wanda. ¿En qué puedo ayudarte?")
     command = assistant.listen()
-    
+
+    if command:
+        save_command(command)  
+
     intent, entities = nlp.get_intent(command)
     print(f"Comando recibido: {command} \n🎯 Intento detectado: {intent} \n📌 Entidades detectadas: {entities}")
 
-    # Route intent to the correct function
     handlers = {
         "weather": handle_weather,
         "email": handle_email,

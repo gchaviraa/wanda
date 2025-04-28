@@ -15,6 +15,7 @@ config.py
 logs/
 *.tmp
 temp/
+command_history.json
 
 # Ignore OS and editor-specific files
 .DS_Store
