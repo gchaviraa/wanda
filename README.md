@@ -1,4 +1,4 @@
-# 🤖 Wanda - Asistente Virtual en Español
+# 🤖 Wanda - Asistente Virtual en Español [IN SPANISH]
 
 Wanda es una asistente virtual personal desarrollada en Python que entiende tus comandos por voz y ejecuta acciones como:
 
