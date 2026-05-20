@@ -27,6 +27,9 @@ Wanda walks you through a step-by-step conversation to log a new income or expen
 ### ❌ Error handling
 If the business server is unavailable, Wanda responds with a clear error message instead of silently failing.
 
+### 🇲🇽 Spanish language
+All conversations and responses are in Spanish, designed for Spanish-speaking users.
+
 ### 🚫 Cancel anytime
 Type `cancelar` at any point during a conversation to cancel the current operation.
 
