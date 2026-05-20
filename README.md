@@ -1,58 +1,106 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# Wanda — Business Assistant Bot
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+A Telegram bot built with Laravel that connects to a real-world business management web application, allowing you to query and register income, expenses and transactions directly from your phone — no need to open the app.
 
-## About Laravel
+Built for a business that manages daily income, expenses, and repair orders through an internal web platform.
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+---
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+## What Wanda can do
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+### 📊 Monthly Summary
+Ask Wanda for a summary of the current month and get:
+- Total income
+- Total expenses
+- Credit expenses breakdown
+- Balance
 
-## Learning Laravel
+### 📝 Register a new transaction
+Wanda walks you through a step-by-step conversation to log a new income or expense entry, including:
+- Type (income or expense)
+- Amount
+- Description
+- Category & subcategory
+- Project
+- Date
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+### ❌ Error handling
+If the business server is unavailable, Wanda responds with a clear error message instead of silently failing.
 
-In addition, [Laracasts](https://laracasts.com) contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+### 🚫 Cancel anytime
+Type `cancelar` at any point during a conversation to cancel the current operation.
 
-You can also watch bite-sized lessons with real-world projects on [Laravel Learn](https://laravel.com/learn), where you will be guided through building a Laravel application from scratch while learning PHP fundamentals.
+---
 
-## Agentic Development
+## Tech stack
 
-Laravel's predictable structure and conventions make it ideal for AI coding agents like Claude Code, Cursor, and GitHub Copilot. Install [Laravel Boost](https://laravel.com/docs/ai) to supercharge your AI workflow:
+| Layer | Technology |
+|---|---|
+| Bot backend | Laravel 12 (PHP) |
+| Business API | Laravel 12 (PHP) |
+| Database | MySQL |
+| Messaging | Telegram Bot API |
+| Local tunneling (dev) | ngrok |
 
-```bash
-composer require laravel/boost --dev
+---
 
-php artisan boost:install
+## Architecture
+
+```
+Telegram
+    ↕
+Wanda Bot (Laravel)
+    ↕
+Business App API (Laravel)
+    ↕
+MySQL Database
 ```
 
-Boost provides your agent 15+ tools and skills that help agents build Laravel applications while following best practices.
+Wanda communicates with the business application through a secured REST API using a private token. It never connects directly to the database.
 
-## Contributing
+---
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+## Security
 
-## Code of Conduct
+- All API endpoints are protected with a secret token via a custom `X-Wanda-Token` header
+- The business API is not publicly exposed
+- No sensitive business data is stored in the bot
 
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
+---
 
-## Security Vulnerabilities
+## Roadmap
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
+- [ ] Query by specific month or year
+- [ ] Natural language understanding via Claude API
+- [ ] Automated weekly summaries
+- [ ] Deploy to self-hosted Raspberry Pi server
+- [ ] Migrate from Telegram to WhatsApp (Twilio)
 
-## License
+---
 
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+## Setup
+
+### Requirements
+- PHP 8.2+
+- Composer
+- A Telegram bot token (via [@BotFather](https://t.me/BotFather))
+- A running instance of the business API
+
+### Environment variables
+
+```env
+TELEGRAM_TOKEN=your-telegram-bot-token
+WANDA_API_URL=https://your-business-app-url.com
+WANDA_TOKEN=your-secret-token
+```
+
+### Register the webhook
+```bash
+curl "https://api.telegram.org/botYOUR_TOKEN/setWebhook?url=https://your-domain.com/api/telegram/webhook"
+```
+
+---
+
+## Author
+
+Gustavo Chavira — [github.com/gchaviraa](https://github.com/gchaviraa)
