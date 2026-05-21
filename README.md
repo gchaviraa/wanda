@@ -8,14 +8,14 @@ Built for a business that manages daily income, expenses, and repair orders thro
 
 ## What Wanda can do
 
-### 📊 Monthly Summary
-Ask Wanda for a summary of the current month and get:
+### Monthly Summary
+Ask Wanda anything about the current month in natural language and get:
 - Total income
 - Total expenses
 - Credit expenses breakdown
 - Balance
 
-### 📝 Register a new transaction
+### Register a new transaction
 Wanda walks you through a step-by-step conversation to log a new income or expense entry, including:
 - Type (income or expense)
 - Amount
@@ -24,13 +24,16 @@ Wanda walks you through a step-by-step conversation to log a new income or expen
 - Project
 - Date
 
-### ❌ Error handling
+### Natural language understanding
+Powered by Google Gemini 2.5 Flash, Wanda understands what you mean without requiring exact commands. You can ask things like "how are we doing this month?" or "I need to log an expense" and Wanda will figure out what to do.
+
+### Error handling
 If the business server is unavailable, Wanda responds with a clear error message instead of silently failing.
 
-### 🇲🇽 Spanish language
+### Spanish language
 All conversations and responses are in Spanish, designed for Spanish-speaking users.
 
-### 🚫 Cancel anytime
+### Cancel anytime
 Type `cancelar` at any point during a conversation to cancel the current operation.
 
 ---
@@ -43,6 +46,7 @@ Type `cancelar` at any point during a conversation to cancel the current operati
 | Business API | Laravel 12 (PHP) |
 | Database | MySQL |
 | Messaging | Telegram Bot API |
+| AI | Google Gemini 2.5 Flash |
 | Local tunneling (dev) | ngrok |
 
 ---
@@ -51,15 +55,15 @@ Type `cancelar` at any point during a conversation to cancel the current operati
 
 ```
 Telegram
-    ↕
+    |
 Wanda Bot (Laravel)
-    ↕
-Business App API (Laravel)
-    ↕
-MySQL Database
+    |              |
+Google Gemini   Business App API (Laravel)
+(intent)            |
+                MySQL Database
 ```
 
-Wanda communicates with the business application through a secured REST API using a private token. It never connects directly to the database.
+Wanda uses Gemini to interpret what the user wants, then communicates with the business application through a secured REST API. It never connects directly to the database.
 
 ---
 
@@ -74,7 +78,6 @@ Wanda communicates with the business application through a secured REST API usin
 ## Roadmap
 
 - [ ] Query by specific month or year
-- [ ] Natural language understanding via Claude API
 - [ ] Automated weekly summaries
 - [ ] Deploy to self-hosted Raspberry Pi server
 - [ ] Migrate from Telegram to WhatsApp (Twilio)
@@ -87,6 +90,7 @@ Wanda communicates with the business application through a secured REST API usin
 - PHP 8.2+
 - Composer
 - A Telegram bot token (via [@BotFather](https://t.me/BotFather))
+- A Google Gemini API key (via [Google AI Studio](https://aistudio.google.com))
 - A running instance of the business API
 
 ### Environment variables
@@ -95,6 +99,7 @@ Wanda communicates with the business application through a secured REST API usin
 TELEGRAM_TOKEN=your-telegram-bot-token
 WANDA_API_URL=https://your-business-app-url.com
 WANDA_TOKEN=your-secret-token
+GEMINI_API_KEY=your-gemini-api-key
 ```
 
 ### Register the webhook

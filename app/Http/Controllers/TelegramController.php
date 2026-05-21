@@ -6,17 +6,20 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 
+
 class TelegramController extends Controller
 {
     private $token;
     private $wandaUrl;
     private $wandaToken;
+    private $geminiKey;
 
     public function __construct()
     {
         $this->token      = config('app.telegram_token');
         $this->wandaUrl   = config('app.wanda_api_url');
         $this->wandaToken = config('app.wanda_token');
+        $this->geminiKey  = config('app.gemini_api_key');
     }
 
     // ── Sesiones ──────────────────────────────────────────
@@ -38,6 +41,43 @@ class TelegramController extends Controller
         $data = json_decode(Storage::get('sesiones.json') ?? '{}', true);
         unset($data[$chatId]);
         Storage::put('sesiones.json', json_encode($data));
+    }
+
+    // ── Gemini ────────────────────────────────────────────
+    private function preguntarGemini($mensaje)
+    {
+        $prompt = <<<EOT
+    Eres el asistente Wanda. Analiza el siguiente mensaje del usuario y responde ÚNICAMENTE con una de estas acciones en JSON:
+
+    {"accion": "resumen"} — si el usuario quiere ver ingresos, gastos, balance o resumen del mes
+    {"accion": "nuevo_movimiento"} — si el usuario quiere registrar, agregar o crear un ingreso o gasto
+    {"accion": "desconocido"} — si no entiendes qué quiere el usuario
+
+    Mensaje del usuario: "$mensaje"
+
+    Responde SOLO con el JSON, sin explicaciones.
+    EOT;
+
+        try {
+            $response = Http::timeout(10)->post(
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={$this->geminiKey}",
+                [
+                    'contents' => [
+                        ['parts' => [['text' => $prompt]]]
+                    ]
+                ]
+            );
+
+            $texto = $response->json()['candidates'][0]['content']['parts'][0]['text'] ?? '{"accion":"desconocido"}';
+            $texto = trim(str_replace(['```json', '```'], '', $texto));
+            $data  = json_decode($texto, true);
+
+            return $data['accion'] ?? 'desconocido';
+
+        } catch (\Exception $e) {
+            logger('Gemini error: ' . $e->getMessage());
+            return 'desconocido';
+        }
     }
 
     // ── Webhook principal ─────────────────────────────────
@@ -64,18 +104,21 @@ class TelegramController extends Controller
             return response()->json(['ok' => true]);
         }
 
-        // Comandos normales
-        $textoLower = strtolower($texto);
+        // Preguntarle a Gemini qué quiere hacer el usuario
+        $accion = $this->preguntarGemini($texto);
 
-        if (str_contains($textoLower, 'nuevo movimiento') || str_contains($textoLower, 'agregar movimiento')) {
-            $this->setSesion($chatId, ['flujo' => 'nuevo_movimiento', 'paso' => 'tipo']);
-            $this->sendMessage($chatId, "📝 *Nuevo movimiento*\n\n¿Es un ingreso o gasto?\n\nEscribe *ingreso* o *gasto*\n\n_(Escribe *cancelar* en cualquier momento para salir)_");
+        switch ($accion) {
+            case 'resumen':
+                $this->responderResumen($chatId);
+                break;
 
-        } elseif (str_contains($textoLower, 'ingreso') || str_contains($textoLower, 'gasto') || str_contains($textoLower, 'resumen')) {
-            $this->responderResumen($chatId);
+            case 'nuevo_movimiento':
+                $this->setSesion($chatId, ['flujo' => 'nuevo_movimiento', 'paso' => 'tipo']);
+                $this->sendMessage($chatId, "📝 *Nuevo movimiento*\n\n¿Es un ingreso o gasto?\n\nEscribe *ingreso* o *gasto*\n\n_(Escribe *cancelar* en cualquier momento para salir)_");
+                break;
 
-        } else {
-            $this->sendMessage($chatId, "Hola, soy Wanda 👋\n\nPuedo ayudarte con:\n\n📊 *resumen* — ingresos y gastos del mes\n📝 *nuevo movimiento* — registrar un movimiento\n\n_(Escribe *cancelar* para cancelar cualquier operación)_");
+            default:
+                $this->sendMessage($chatId, "Hola, soy Wanda 👋\n\nPuedo ayudarte con:\n\n📊 *Ver resumen* — ingresos y gastos del mes\n📝 *Nuevo movimiento* — registrar un ingreso o gasto\n\n_(Escribe *cancelar* para cancelar cualquier operación)_");
         }
 
         return response()->json(['ok' => true]);
@@ -148,7 +191,6 @@ class TelegramController extends Controller
                     }
                     $sesion['fecha'] = date('Y-m-d', strtotime($texto));
                 }
-
                 $this->guardarMovimiento($chatId, $sesion);
                 break;
         }
