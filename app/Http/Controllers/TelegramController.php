@@ -92,7 +92,7 @@ class TelegramController extends Controller
         logger('Allowed users: ' . config('app.allowed_users'));
 
         // Verificar usuario permitido
-        $allowedUsers = array_filter(explode(',', config('app.allowed_users')));
+        $allowedUsers = array_filter(explode(',', env('ALLOWED_USERS', '')));
         if (!empty($allowedUsers) && !in_array((string)$chatId, $allowedUsers)) {
             $this->sendMessage($chatId, "No tienes acceso a Wanda.");
             return response()->json(['ok' => true]);
