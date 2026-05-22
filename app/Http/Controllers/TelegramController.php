@@ -88,6 +88,9 @@ class TelegramController extends Controller
 
         $chatId = $message['chat']['id'];
 
+        logger('ChatId recibido: ' . $chatId);
+        logger('Allowed users: ' . config('app.allowed_users'));
+
         // Verificar usuario permitido
         $allowedUsers = array_filter(explode(',', config('app.allowed_users')));
         if (!empty($allowedUsers) && !in_array((string)$chatId, $allowedUsers)) {
