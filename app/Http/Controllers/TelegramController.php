@@ -87,6 +87,14 @@ class TelegramController extends Controller
         if (!$message) return response()->json(['ok' => true]);
 
         $chatId = $message['chat']['id'];
+
+        // Verificar usuario permitido
+        $allowedUsers = array_filter(explode(',', config('app.allowed_users')));
+        if (!empty($allowedUsers) && !in_array((string)$chatId, $allowedUsers)) {
+            $this->sendMessage($chatId, "No tienes acceso a Wanda.");
+            return response()->json(['ok' => true]);
+        }
+        
         $texto  = trim($message['text'] ?? '');
 
         // Cancelar en cualquier momento

@@ -127,5 +127,6 @@ return [
     'wanda_api_url'  => env('WANDA_API_URL'),
     'wanda_token'    => env('WANDA_TOKEN'),
     'gemini_api_key' => env('GEMINI_API_KEY'),
+    'allowed_users' => env('ALLOWED_USERS', ''),
 
 ];
