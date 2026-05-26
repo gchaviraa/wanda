@@ -89,6 +89,7 @@ class TelegramController extends Controller
             $texto = $response->json()['candidates'][0]['content']['parts'][0]['text'] ?? '{"accion":"desconocido","mes":null,"anio":null}';
             $texto = trim(str_replace(['```json', '```'], '', $texto));
             $data  = json_decode($texto, true);
+            logger('Gemini resultado: ' . json_encode($data));
 
             return [
                 'accion' => $data['accion'] ?? 'desconocido',
