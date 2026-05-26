@@ -92,14 +92,15 @@ class TelegramController extends Controller
             error_log('Gemini resultado: ' . json_encode($data));
 
             return [
-                'accion' => $data['accion'] ?? 'desconocido',
-                'mes'    => $data['mes'] ?? null,
-                'anio'   => $data['anio'] ?? null,
+                'accion'       => $data['accion'] ?? 'desconocido',
+                'mes'          => $data['mes'] ?? null,
+                'anio'         => $data['anio'] ?? null,
+                'mes_relativo' => $data['mes_relativo'] ?? false,
             ];
 
         } catch (\Exception $e) {
             logger('Gemini error: ' . $e->getMessage());
-            return ['accion' => 'desconocido', 'mes' => null, 'anio' => null];
+            return ['accion' => 'desconocido', 'mes' => null, 'anio' => null, 'mes_relativo' => false];
         }
     }
 
