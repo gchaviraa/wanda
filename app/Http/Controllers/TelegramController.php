@@ -47,17 +47,33 @@ class TelegramController extends Controller
     private function preguntarGemini($mensaje)
     {
         $prompt = <<<EOT
-    Eres el asistente Wanda. Analiza el siguiente mensaje del usuario y responde ÚNICAMENTE con una de estas acciones en JSON:
+        Eres el asistente Wanda. Analiza el siguiente mensaje del usuario y responde ÚNICAMENTE con un JSON con esta estructura:
 
-    {"accion": "resumen"} — si el usuario quiere ver ingresos, gastos, balance o resumen del mes
-    {"accion": "nuevo_movimiento"} — si el usuario quiere registrar, agregar o crear un ingreso o gasto
-    {"accion": "desconocido"} — si no entiendes qué quiere el usuario
+        {
+        "accion": "resumen" | "nuevo_movimiento" | "desconocido",
+        "mes": null | número del mes (1-12),
+        "anio": null | año (ejemplo: 2026)
+        }
 
-    Mensaje del usuario: "$mensaje"
+        Reglas:
+        - "accion" es "resumen" si el usuario quiere ver ingresos, gastos, balance o resumen
+        - "accion" es "nuevo_movimiento" si el usuario quiere registrar, agregar o crear un ingreso o gasto
+        - "accion" es "desconocido" si no entiendes qué quiere
+        - "mes" y "anio" solo si el usuario menciona un mes o año específico, si no ponlos en null
+        - Si dice "este mes" o no menciona mes, ponlos en null
+        - La fecha actual es: EOT . now()->format('d/m/Y') . <<<EOT
 
-    Responde SOLO con el JSON, sin explicaciones.
-    EOT;
 
+        Ejemplos:
+        - "cómo vamos este mes" → {"accion":"resumen","mes":null,"anio":null}
+        - "resumen de abril" → {"accion":"resumen","mes":4,"anio":2026}
+        - "ingresos de enero 2025" → {"accion":"resumen","mes":1,"anio":2025}
+        - "quiero registrar un gasto" → {"accion":"nuevo_movimiento","mes":null,"anio":null}
+
+        Mensaje del usuario: "$mensaje"
+
+        Responde SOLO con el JSON, sin explicaciones.
+        EOT;
         try {
             $response = Http::timeout(10)->post(
                 "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={$this->geminiKey}",
@@ -68,15 +84,19 @@ class TelegramController extends Controller
                 ]
             );
 
-            $texto = $response->json()['candidates'][0]['content']['parts'][0]['text'] ?? '{"accion":"desconocido"}';
+            $texto = $response->json()['candidates'][0]['content']['parts'][0]['text'] ?? '{"accion":"desconocido","mes":null,"anio":null}';
             $texto = trim(str_replace(['```json', '```'], '', $texto));
             $data  = json_decode($texto, true);
 
-            return $data['accion'] ?? 'desconocido';
+            return [
+                'accion' => $data['accion'] ?? 'desconocido',
+                'mes'    => $data['mes'] ?? null,
+                'anio'   => $data['anio'] ?? null,
+            ];
 
         } catch (\Exception $e) {
             logger('Gemini error: ' . $e->getMessage());
-            return 'desconocido';
+            return ['accion' => 'desconocido', 'mes' => null, 'anio' => null];
         }
     }
 
@@ -88,17 +108,14 @@ class TelegramController extends Controller
 
         $chatId = $message['chat']['id'];
 
-        logger('ChatId recibido: ' . $chatId);
-        logger('Allowed users: ' . config('app.allowed_users'));
-
         // Verificar usuario permitido
         $allowedUsers = array_filter(explode(',', env('ALLOWED_USERS', '')));
         if (!empty($allowedUsers) && !in_array((string)$chatId, $allowedUsers)) {
             $this->sendMessage($chatId, "No tienes acceso a Wanda.");
             return response()->json(['ok' => true]);
         }
-        
-        $texto  = trim($message['text'] ?? '');
+
+        $texto = trim($message['text'] ?? '');
 
         // Cancelar en cualquier momento
         if (strtolower($texto) === 'cancelar') {
@@ -116,11 +133,14 @@ class TelegramController extends Controller
         }
 
         // Preguntarle a Gemini qué quiere hacer el usuario
-        $accion = $this->preguntarGemini($texto);
+        $resultado = $this->preguntarGemini($texto);
+        $accion    = $resultado['accion'];
+        $mes       = $resultado['mes'] ?? now()->month;
+        $anio      = $resultado['anio'] ?? now()->year;
 
         switch ($accion) {
             case 'resumen':
-                $this->responderResumen($chatId);
+                $this->responderResumen($chatId, $mes, $anio);
                 break;
 
             case 'nuevo_movimiento':
@@ -239,14 +259,17 @@ class TelegramController extends Controller
     }
 
     // ── Resumen mensual ───────────────────────────────────
-    private function responderResumen($chatId)
+    private function responderResumen($chatId, $mes = null, $anio = null)
     {
+        $mes  = $mes  ?? now()->month;
+        $anio = $anio ?? now()->year;
+
         try {
             $response = Http::timeout(10)->withHeaders([
                 'X-Wanda-Token' => $this->wandaToken,
             ])->get("{$this->wandaUrl}/api/wanda/resumen", [
-                'mes'  => now()->month,
-                'anio' => now()->year,
+                'mes'  => $mes,
+                'anio' => $anio,
             ]);
 
             if (!$response->successful()) {
