@@ -47,33 +47,35 @@ class TelegramController extends Controller
     private function preguntarGemini($mensaje)
     {
         $prompt = <<<EOT
-        Eres el asistente Wanda. Analiza el siguiente mensaje del usuario y responde ÚNICAMENTE con un JSON con esta estructura:
+            Eres el asistente Wanda. Analiza el siguiente mensaje del usuario y responde ÚNICAMENTE con un JSON con esta estructura:
 
-        {
-        "accion": "resumen" | "nuevo_movimiento" | "desconocido",
-        "mes": null | número del mes (1-12),
-        "anio": null | año (ejemplo: 2026)
-        }
+            {
+            "accion": "resumen" | "nuevo_movimiento" | "desconocido",
+            "mes": null | número del mes (1-12),
+            "anio": null | año (ejemplo: 2026),
+            "mes_relativo": false | true
+            }
 
-        Reglas:
-        - "accion" es "resumen" si el usuario quiere ver ingresos, gastos, balance o resumen
-        - "accion" es "nuevo_movimiento" si el usuario quiere registrar, agregar o crear un ingreso o gasto
-        - "accion" es "desconocido" si no entiendes qué quiere
-        - "mes" y "anio" solo si el usuario menciona un mes o año específico, si no ponlos en null
-        - Si dice "este mes" o no menciona mes, ponlos en null
-        - La fecha actual es: EOT . now()->format('d/m/Y') . <<<EOT
+            Reglas:
+            - "accion" es "resumen" si el usuario quiere ver ingresos, gastos, balance o resumen
+            - "accion" es "nuevo_movimiento" si el usuario quiere registrar, agregar o crear un ingreso o gasto
+            - "accion" es "desconocido" si no entiendes qué quiere
+            - "mes" y "anio" solo si el usuario menciona un mes o año específico, si no ponlos en null
+            - "mes_relativo" es true si el usuario dice "mes pasado", "el mes anterior" o similar
+            - Si dice "este mes" o no menciona mes, todo en null y mes_relativo en false
+            - La fecha actual es: EOT . now()->format('d/m/Y') . <<<EOT
 
+            Ejemplos:
+            - "cómo vamos este mes" → {"accion":"resumen","mes":null,"anio":null,"mes_relativo":false}
+            - "resumen de abril" → {"accion":"resumen","mes":4,"anio":2026,"mes_relativo":false}
+            - "resumen del mes pasado" → {"accion":"resumen","mes":null,"anio":null,"mes_relativo":true}
+            - "ingresos de enero 2025" → {"accion":"resumen","mes":1,"anio":2025,"mes_relativo":false}
+            - "quiero registrar un gasto" → {"accion":"nuevo_movimiento","mes":null,"anio":null,"mes_relativo":false}
 
-        Ejemplos:
-        - "cómo vamos este mes" → {"accion":"resumen","mes":null,"anio":null}
-        - "resumen de abril" → {"accion":"resumen","mes":4,"anio":2026}
-        - "ingresos de enero 2025" → {"accion":"resumen","mes":1,"anio":2025}
-        - "quiero registrar un gasto" → {"accion":"nuevo_movimiento","mes":null,"anio":null}
+            Mensaje del usuario: "$mensaje"
 
-        Mensaje del usuario: "$mensaje"
-
-        Responde SOLO con el JSON, sin explicaciones.
-        EOT;
+            Responde SOLO con el JSON, sin explicaciones.
+            EOT;
         try {
             $response = Http::timeout(10)->post(
                 "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={$this->geminiKey}",
@@ -132,11 +134,19 @@ class TelegramController extends Controller
             return response()->json(['ok' => true]);
         }
 
-        // Preguntarle a Gemini qué quiere hacer el usuario
         $resultado = $this->preguntarGemini($texto);
         $accion    = $resultado['accion'];
-        $mes       = $resultado['mes'] ?? now()->month;
-        $anio      = $resultado['anio'] ?? now()->year;
+
+        // Si Gemini no extrajo mes/año, usar el actual
+        $mes  = $resultado['mes'] ?? now()->month;
+        $anio = $resultado['anio'] ?? now()->year;
+
+        // Manejar "mes pasado" en PHP directamente
+        if ($resultado['mes_relativo'] ?? false) {
+            $fecha = now()->subMonth();
+            $mes   = $fecha->month;
+            $anio  = $fecha->year;
+        }
 
         switch ($accion) {
             case 'resumen':
