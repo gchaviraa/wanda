@@ -156,7 +156,7 @@ class TelegramController extends Controller
 
             case 'nuevo_movimiento':
                 $this->setSesion($chatId, ['flujo' => 'nuevo_movimiento', 'paso' => 'tipo']);
-                $this->sendMessage($chatId, "📝 *Nuevo movimiento*\n\n¿Es un ingreso o gasto?\n\nEscribe *ingreso* o *gasto*\n\n_(Escribe *cancelar* en cualquier momento para salir)_");
+                $this->sendMessage($chatId, "📝 *Nuevo movimiento*\n\n¿Qué tipo es?\n\nEscribe *ingreso*, *gasto* o *pago_tarjeta*\n\n_(Escribe *cancelar* en cualquier momento para salir)_");
                 break;
 
             default:
@@ -174,8 +174,8 @@ class TelegramController extends Controller
         switch ($sesion['paso']) {
             case 'tipo':
                 $tipo = strtolower($texto);
-                if (!in_array($tipo, ['ingreso', 'gasto'])) {
-                    $this->sendMessage($chatId, "⚠️ Escribe *ingreso* o *gasto*.");
+                if (!in_array($tipo, ['ingreso', 'gasto', 'pago_tarjeta'])) {
+                    $this->sendMessage($chatId, "⚠️ Escribe *ingreso*, *gasto* o *pago_tarjeta*.");
                     return;
                 }
                 $sesion['tipo'] = $tipo;
@@ -197,9 +197,16 @@ class TelegramController extends Controller
 
             case 'descripcion':
                 $sesion['descripcion'] = $omitir ? null : $texto;
-                $sesion['paso']        = 'categoria';
-                $this->setSesion($chatId, $sesion);
-                $this->sendMessage($chatId, "🏷️ ¿Categoría? (o escribe *omitir*)");
+
+                if ($sesion['tipo'] === 'pago_tarjeta') {
+                    $sesion['paso'] = 'fecha';
+                    $this->setSesion($chatId, $sesion);
+                    $this->sendMessage($chatId, "📅 ¿Fecha? Escribe *hoy* o una fecha (ejemplo: 2026-05-15)");
+                } else {
+                    $sesion['paso'] = 'categoria';
+                    $this->setSesion($chatId, $sesion);
+                    $this->sendMessage($chatId, "🏷️ ¿Categoría? (o escribe *omitir*)");
+                }
                 break;
 
             case 'categoria':
@@ -288,13 +295,13 @@ class TelegramController extends Controller
                 return;
             }
 
-            $data     = $response->json();
-            $ingresos = number_format($data['ingresos'], 2);
-            $gastos   = number_format($data['gastos'], 2);
-            $credito  = number_format($data['credito'], 2);
-            $balance  = number_format($data['balance'], 2);
+            $data         = $response->json();
+            $ingresos     = number_format($data['ingresos'], 2);
+            $gastos       = number_format($data['gastos'], 2);
+            $saldoTarjeta = number_format($data['saldo_tarjeta'], 2);
+            $balance      = number_format($data['balance'], 2);
 
-            $this->sendMessage($chatId, "📊 *Resumen de {$data['periodo']}*\n\n✅ Ingresos: \$$ingresos\n❌ Gastos: \$$gastos\n💳 Crédito: \$$credito\n💰 Balance: \$$balance");
+            $this->sendMessage($chatId, "📊 *Resumen de {$data['periodo']}*\n\n✅ Ingresos: \$$ingresos\n❌ Gastos: \$$gastos\n💳 Saldo tarjeta: \$$saldoTarjeta\n💰 Balance: \$$balance");
 
         } catch (\Exception $e) {
             $this->sendMessage($chatId, "⚠️ No pude conectar con la base de datos. Verifica que el servidor esté activo e intenta de nuevo.");
