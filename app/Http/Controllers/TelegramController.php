@@ -301,10 +301,40 @@ class TelegramController extends Controller
             $saldoTarjeta = number_format($data['saldo_tarjeta'], 2);
             $balance      = number_format($data['balance'], 2);
 
-            $this->sendMessage($chatId, "📊 *Resumen de {$data['periodo']}*\n\n✅ Ingresos: \$$ingresos\n❌ Gastos: \$$gastos\n💳 Saldo tarjeta: \$$saldoTarjeta\n💰 Balance: \$$balance");
+            // Pedirle a Gemini un comentario sobre los datos
+            $comentario = $this->generarComentario($data);
+
+            $this->sendMessage($chatId, "$comentario\n\n📊 *Resumen de {$data['periodo']}*\n\n✅ Ingresos: \$$ingresos\n❌ Gastos: \$$gastos\n💳 Saldo tarjeta: \$$saldoTarjeta\n💰 Balance: \$$balance");
 
         } catch (\Exception $e) {
             $this->sendMessage($chatId, "⚠️ No pude conectar con la base de datos. Verifica que el servidor esté activo e intenta de nuevo.");
+        }
+    }
+
+    private function generarComentario($data)
+    {
+        $prompt = "Eres Wanda, un asistente de negocios. Con base en estos datos financieros del período {$data['periodo']}, escribe UN comentario corto (máximo 2 oraciones) en español sobre cómo va el negocio. Sé directo y útil. No uses emojis ni formato markdown.
+
+    Datos:
+    - Ingresos: \${$data['ingresos']}
+    - Gastos: \${$data['gastos']}
+    - Saldo tarjeta pendiente: \${$data['saldo_tarjeta']}
+    - Balance: \${$data['balance']}";
+
+        try {
+            $response = Http::timeout(10)->post(
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={$this->geminiKey}",
+                [
+                    'contents' => [
+                        ['parts' => [['text' => $prompt]]]
+                    ]
+                ]
+            );
+
+            return trim($response->json()['candidates'][0]['content']['parts'][0]['text'] ?? '');
+
+        } catch (\Exception $e) {
+            return '';
         }
     }
 
