@@ -64,7 +64,9 @@ class TelegramController extends Controller
         - "accion" es "desconocido" si no entiendes qué quiere
         - "mes" y "anio" solo si el usuario menciona un mes o año específico, si no ponlos en null
         - "mes_relativo" es true si el usuario dice "mes pasado", "el mes anterior" o similar
-        - "busqueda" es el texto del componente que busca, null si no aplica
+        - "busqueda" debe contener solo el término técnico a buscar, sin palabras como "busca", "capacitores", "componente", "tienes", "hay", etc.
+        - Si el usuario busca por especificaciones técnicas extrae solo esas: "25V", "10uF 100V", "100V", etc.
+        - Si el usuario busca por número de componente extrae solo el número: "C-001", "UKL2A100MPD1AA", etc.
         - La fecha actual es: EOT . now()->format('d/m/Y') . <<<EOT
 
         Ejemplos:
@@ -72,7 +74,9 @@ class TelegramController extends Controller
         - "resumen de abril" → {"accion":"resumen","mes":4,"anio":2026,"mes_relativo":false,"busqueda":null}
         - "resumen del mes pasado" → {"accion":"resumen","mes":null,"anio":null,"mes_relativo":true,"busqueda":null}
         - "cuántos 10uF 100V tenemos" → {"accion":"inventario","mes":null,"anio":null,"mes_relativo":false,"busqueda":"10uF 100V"}
-        - "stock del componente C-001" → {"accion":"inventario","mes":null,"anio":null,"mes_relativo":false,"busqueda":"C-001"}
+        - "busca capacitores de 25V" → {"accion":"inventario","mes":null,"anio":null,"mes_relativo":false,"busqueda":"25V"}
+        - "tienes capacitores de 10uF 100V" → {"accion":"inventario","mes":null,"anio":null,"mes_relativo":false,"busqueda":"10uF 100V"}
+        - "stock del UKL2A100MPD1AA" → {"accion":"inventario","mes":null,"anio":null,"mes_relativo":false,"busqueda":"UKL2A100MPD1AA"}
         - "quiero registrar un gasto" → {"accion":"nuevo_movimiento","mes":null,"anio":null,"mes_relativo":false,"busqueda":null}
 
         Mensaje del usuario: "$mensaje"
@@ -140,6 +144,7 @@ class TelegramController extends Controller
         }
 
         $resultado = $this->preguntarGemini($texto);
+        logger('Gemini resultado: ' . json_encode($resultado));
         $accion    = $resultado['accion'];
 
         // Si Gemini no extrajo mes/año, usar el actual
