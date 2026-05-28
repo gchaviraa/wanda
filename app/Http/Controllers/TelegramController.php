@@ -47,35 +47,38 @@ class TelegramController extends Controller
     private function preguntarGemini($mensaje)
     {
         $prompt = <<<EOT
-            Eres el asistente Wanda. Analiza el siguiente mensaje del usuario y responde ÚNICAMENTE con un JSON con esta estructura:
+        Eres el asistente Wanda. Analiza el siguiente mensaje del usuario y responde ÚNICAMENTE con un JSON con esta estructura:
 
-            {
-            "accion": "resumen" | "nuevo_movimiento" | "desconocido",
-            "mes": null | número del mes (1-12),
-            "anio": null | año (ejemplo: 2026),
-            "mes_relativo": false | true
-            }
+        {
+        "accion": "resumen" | "nuevo_movimiento" | "inventario" | "desconocido",
+        "mes": null | número del mes (1-12),
+        "anio": null | año (ejemplo: 2026),
+        "mes_relativo": false | true,
+        "busqueda": null | texto a buscar en inventario
+        }
 
-            Reglas:
-            - "accion" es "resumen" si el usuario quiere ver ingresos, gastos, balance o resumen
-            - "accion" es "nuevo_movimiento" si el usuario quiere registrar, agregar o crear un ingreso o gasto
-            - "accion" es "desconocido" si no entiendes qué quiere
-            - "mes" y "anio" solo si el usuario menciona un mes o año específico, si no ponlos en null
-            - "mes_relativo" es true si el usuario dice "mes pasado", "el mes anterior" o similar
-            - Si dice "este mes" o no menciona mes, todo en null y mes_relativo en false
-            - La fecha actual es: EOT . now()->format('d/m/Y') . <<<EOT
+        Reglas:
+        - "accion" es "resumen" si el usuario quiere ver ingresos, gastos, balance o resumen
+        - "accion" es "nuevo_movimiento" si el usuario quiere registrar, agregar o crear un ingreso o gasto
+        - "accion" es "inventario" si el usuario pregunta por stock, componentes, partes o inventario
+        - "accion" es "desconocido" si no entiendes qué quiere
+        - "mes" y "anio" solo si el usuario menciona un mes o año específico, si no ponlos en null
+        - "mes_relativo" es true si el usuario dice "mes pasado", "el mes anterior" o similar
+        - "busqueda" es el texto del componente que busca, null si no aplica
+        - La fecha actual es: EOT . now()->format('d/m/Y') . <<<EOT
 
-            Ejemplos:
-            - "cómo vamos este mes" → {"accion":"resumen","mes":null,"anio":null,"mes_relativo":false}
-            - "resumen de abril" → {"accion":"resumen","mes":4,"anio":2026,"mes_relativo":false}
-            - "resumen del mes pasado" → {"accion":"resumen","mes":null,"anio":null,"mes_relativo":true}
-            - "ingresos de enero 2025" → {"accion":"resumen","mes":1,"anio":2025,"mes_relativo":false}
-            - "quiero registrar un gasto" → {"accion":"nuevo_movimiento","mes":null,"anio":null,"mes_relativo":false}
+        Ejemplos:
+        - "cómo vamos este mes" → {"accion":"resumen","mes":null,"anio":null,"mes_relativo":false,"busqueda":null}
+        - "resumen de abril" → {"accion":"resumen","mes":4,"anio":2026,"mes_relativo":false,"busqueda":null}
+        - "resumen del mes pasado" → {"accion":"resumen","mes":null,"anio":null,"mes_relativo":true,"busqueda":null}
+        - "cuántos 10uF 100V tenemos" → {"accion":"inventario","mes":null,"anio":null,"mes_relativo":false,"busqueda":"10uF 100V"}
+        - "stock del componente C-001" → {"accion":"inventario","mes":null,"anio":null,"mes_relativo":false,"busqueda":"C-001"}
+        - "quiero registrar un gasto" → {"accion":"nuevo_movimiento","mes":null,"anio":null,"mes_relativo":false,"busqueda":null}
 
-            Mensaje del usuario: "$mensaje"
+        Mensaje del usuario: "$mensaje"
 
-            Responde SOLO con el JSON, sin explicaciones.
-            EOT;
+        Responde SOLO con el JSON, sin explicaciones.
+        EOT;
         try {
             $response = Http::timeout(10)->post(
                 "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={$this->geminiKey}",
@@ -95,6 +98,7 @@ class TelegramController extends Controller
                 'mes'          => $data['mes'] ?? null,
                 'anio'         => $data['anio'] ?? null,
                 'mes_relativo' => $data['mes_relativo'] ?? false,
+                'busqueda'     => $data['busqueda'] ?? null,
             ];
 
         } catch (\Exception $e) {
@@ -158,12 +162,55 @@ class TelegramController extends Controller
                 $this->setSesion($chatId, ['flujo' => 'nuevo_movimiento', 'paso' => 'tipo']);
                 $this->sendMessage($chatId, "📝 *Nuevo movimiento*\n\n¿Qué tipo es?\n\nEscribe *ingreso*, *gasto* o *pago_tarjeta*\n\n_(Escribe *cancelar* en cualquier momento para salir)_");
                 break;
-
+            case 'inventario':
+                if (empty($resultado['busqueda'])) {
+                    $this->sendMessage($chatId, "¿Qué componente quieres buscar?");
+                } else {
+                    $this->responderInventario($chatId, $resultado['busqueda']);
+                }
+                break;
             default:
                 $this->sendMessage($chatId, "Hola, soy Wanda 👋\n\nPuedo ayudarte con:\n\n📊 *Ver resumen* — ingresos y gastos del mes\n📝 *Nuevo movimiento* — registrar un ingreso o gasto\n\n_(Escribe *cancelar* para cancelar cualquier operación)_");
         }
 
         return response()->json(['ok' => true]);
+    }
+
+    private function responderInventario($chatId, $busqueda)
+    {
+        try {
+            $response = Http::timeout(10)->withHeaders([
+                'X-Wanda-Token' => $this->wandaToken,
+            ])->get("{$this->wandaUrl}/api/wanda/inventario", [
+                'q' => $busqueda,
+            ]);
+
+            if (!$response->successful()) {
+                $this->sendMessage($chatId, "⚠️ No pude conectar con la base de datos. Intenta de nuevo.");
+                return;
+            }
+
+            $data = $response->json();
+
+            if ($data['total'] === 0) {
+                $this->sendMessage($chatId, "No encontré ningún componente para \"$busqueda\".");
+                return;
+            }
+
+            $texto = "🔍 *Resultados para \"$busqueda\"* ({$data['total']} encontrados)\n\n";
+
+            foreach ($data['resultados'] as $item) {
+                $texto .= "📦 *{$item['componente']}*\n";
+                $texto .= "Num: `{$item['num_componente']}`\n";
+                $texto .= "Stock: {$item['stock']} | Caja: {$item['caja_locacion']}\n";
+                $texto .= "Proveedor: {$item['proveedor']}\n\n";
+            }
+
+            $this->sendMessage($chatId, $texto);
+
+        } catch (\Exception $e) {
+            $this->sendMessage($chatId, "⚠️ No pude conectar con la base de datos. Intenta de nuevo.");
+        }
     }
 
     // ── Flujo nuevo movimiento ────────────────────────────
