@@ -37,7 +37,7 @@ class TelegramController extends Controller
         // Verificar que el usuario esté en la lista de permitidos
         $allowedUsers = array_filter(explode(',', env('ALLOWED_USERS', '')));
         if (!empty($allowedUsers) && !in_array((string)$chatId, $allowedUsers)) {
-            $this->sendMessage($chatId, "No tienes acceso a Wanda.");
+            $this->sendMessage($chatId, "🚫 No tienes acceso a Wanda.");
             return response()->json(['ok' => true]);
         }
 
@@ -46,7 +46,7 @@ class TelegramController extends Controller
         // "cancelar" termina cualquier flujo activo
         if (strtolower($texto) === 'cancelar') {
             $this->borrarSesion($chatId);
-            $this->sendMessage($chatId, "Operación cancelada.");
+            $this->sendMessage($chatId, "❌ Operación cancelada.");
             return response()->json(['ok' => true]);
         }
 
@@ -78,19 +78,19 @@ class TelegramController extends Controller
 
             case 'nuevo_movimiento':
                 $this->setSesion($chatId, ['flujo' => 'nuevo_movimiento', 'paso' => 'tipo']);
-                $this->sendMessage($chatId, "Nuevo movimiento\n\nQue tipo es?\n\nEscribe ingreso, gasto o pago_tarjeta\n\n(Escribe cancelar en cualquier momento para salir)");
+                $this->sendMessage($chatId, "📝 *Nuevo movimiento*\n\n¿Qué tipo es?\n\nEscribe *ingreso*, *gasto* o *pago_tarjeta*\n\n_(Escribe *cancelar* en cualquier momento para salir)_");
                 break;
 
             case 'inventario':
                 if (empty($resultado['busqueda'])) {
-                    $this->sendMessage($chatId, "Que componente quieres buscar?");
+                    $this->sendMessage($chatId, "🔍 ¿Qué componente quieres buscar?");
                 } else {
                     $this->responderInventario($chatId, $resultado['busqueda']);
                 }
                 break;
 
             default:
-                $this->sendMessage($chatId, "Hola, soy Wanda\n\nPuedo ayudarte con:\n\n- Ver resumen: ingresos y gastos del mes\n- Nuevo movimiento: registrar un ingreso o gasto\n- Inventario: buscar stock de componentes\n\n(Escribe cancelar para cancelar cualquier operacion)");
+                $this->sendMessage($chatId, "👋 Hola, soy Wanda\n\nPuedo ayudarte con:\n\n📊 *Ver resumen* — ingresos y gastos del mes\n📝 *Nuevo movimiento* — registrar un ingreso o gasto\n🔍 *Inventario* — buscar stock de componentes\n\n_(Escribe *cancelar* para cancelar cualquier operación)_");
         }
 
         return response()->json(['ok' => true]);
@@ -98,7 +98,7 @@ class TelegramController extends Controller
 
     // ─────────────────────────────────────────────────────
     // GEMINI
-    // Interpreta el mensaje del usuario y decide que hacer.
+    // Interpreta el mensaje del usuario y decide qué hacer.
     // ─────────────────────────────────────────────────────
 
     private function preguntarGemini($mensaje)
@@ -115,13 +115,17 @@ class TelegramController extends Controller
             $texto = trim(str_replace(['```json', '```'], '', $texto));
             $data  = json_decode($texto, true);
 
-            return [
+            $resultado = [
                 'accion'       => $data['accion']      ?? 'desconocido',
                 'mes'          => $data['mes']          ?? null,
                 'anio'         => $data['anio']         ?? null,
                 'mes_relativo' => $data['mes_relativo'] ?? false,
                 'busqueda'     => $data['busqueda']     ?? null,
             ];
+
+            //logger('Gemini resultado: ' . json_encode($resultado));
+
+            return $resultado;
 
         } catch (\Exception $e) {
             logger('Gemini error: ' . $e->getMessage());
@@ -165,7 +169,7 @@ class TelegramController extends Controller
             ]);
 
             if (!$response->successful()) {
-                $this->sendMessage($chatId, "No pude conectar con la base de datos. Verifica que el servidor este activo e intenta de nuevo.");
+                $this->sendMessage($chatId, "⚠️ No pude conectar con la base de datos. Verifica que el servidor esté activo e intenta de nuevo.");
                 return;
             }
 
@@ -177,52 +181,59 @@ class TelegramController extends Controller
 
             $comentario = $this->generarComentario($data);
 
-            $this->sendMessage($chatId, "$comentario\n\nResumen de {$data['periodo']}\n\nIngresos: $$ingresos\nGastos: $$gastos\nSaldo tarjeta: $$saldoTarjeta\nBalance: $$balance");
+            $this->sendMessage($chatId, "$comentario\n\n📊 *Resumen de {$data['periodo']}*\n\n✅ Ingresos: \$$ingresos\n❌ Gastos: \$$gastos\n💳 Saldo tarjeta: \$$saldoTarjeta\n💰 Balance: \$$balance");
 
         } catch (\Exception $e) {
-            $this->sendMessage($chatId, "No pude conectar con la base de datos. Verifica que el servidor este activo e intenta de nuevo.");
+            $this->sendMessage($chatId, "⚠️ No pude conectar con la base de datos. Verifica que el servidor esté activo e intenta de nuevo.");
         }
     }
 
     // ─────────────────────────────────────────────────────
     // INVENTARIO
-    // Busca componentes por nombre o numero de parte.
+    // Busca componentes por nombre o número de parte.
     // ─────────────────────────────────────────────────────
 
     private function responderInventario($chatId, $busqueda)
     {
         try {
+            //logger('Buscando inventario: ' . $busqueda);
+
             $response = Http::timeout(10)->withHeaders([
                 'X-Wanda-Token' => $this->wandaToken,
             ])->get("{$this->wandaUrl}/api/wanda/inventario", [
                 'q' => $busqueda,
             ]);
 
+            //logger('Inventario status: ' . $response->status());
+            //logger('Inventario body: ' . $response->body());
+
             if (!$response->successful()) {
-                $this->sendMessage($chatId, "No pude conectar con la base de datos. Intenta de nuevo.");
+                $this->sendMessage($chatId, "⚠️ No pude conectar con la base de datos. Intenta de nuevo.");
                 return;
             }
 
             $data = $response->json();
 
             if ($data['total'] === 0) {
-                $this->sendMessage($chatId, "No encontre ningun componente para \"$busqueda\".");
+                $this->sendMessage($chatId, "🔍 No encontré ningún componente para \"$busqueda\".");
                 return;
             }
 
-            $texto = "Resultados para \"$busqueda\" ({$data['total']} encontrados)\n\n";
+            $texto = "🔍 *Resultados para \"$busqueda\"* ({$data['total']} encontrados)\n\n";
 
             foreach ($data['resultados'] as $item) {
-                $texto .= "{$item['componente']}\n";
-                $texto .= "Num: {$item['num_componente']}\n";
+                $texto .= "📦 *{$item['componente']}*\n";
+                $texto .= "Num: `{$item['num_componente']}`\n";
                 $texto .= "Stock: {$item['stock']} | Caja: {$item['caja_locacion']}\n";
-                $texto .= "Proveedor: {$item['proveedor']}\n\n";
+                $texto .= "Proveedor: {$item['proveedor']}\n";
+                $texto .= "P/U: {$item['precio']} (Puede variar)\n\n";
             }
 
             $this->sendMessage($chatId, $texto);
 
         } catch (\Exception $e) {
-            $this->sendMessage($chatId, "No pude conectar con la base de datos. Intenta de nuevo.");
+            logger('Inventario error: ' . $e->getMessage());
+            $this->sendMessage($chatId, "⚠️ No pude conectar con la base de datos. Intenta de nuevo.");
         }
     }
 
@@ -239,38 +250,38 @@ class TelegramController extends Controller
             case 'tipo':
                 $tipo = strtolower($texto);
                 if (!in_array($tipo, ['ingreso', 'gasto', 'pago_tarjeta'])) {
-                    $this->sendMessage($chatId, "Escribe ingreso, gasto o pago_tarjeta.");
+                    $this->sendMessage($chatId, "⚠️ Escribe *ingreso*, *gasto* o *pago_tarjeta*.");
                     return;
                 }
                 $sesion['tipo'] = $tipo;
                 $sesion['paso'] = 'cantidad';
                 $this->setSesion($chatId, $sesion);
-                $this->sendMessage($chatId, "Cuanto? (solo el numero, ejemplo: 350)");
+                $this->sendMessage($chatId, "💰 ¿Cuánto? (solo el número, ejemplo: 350)");
                 break;
 
             case 'cantidad':
                 if (!is_numeric($texto) || $texto <= 0) {
-                    $this->sendMessage($chatId, "Escribe solo el monto, ejemplo: 350");
+                    $this->sendMessage($chatId, "⚠️ Escribe solo el monto, ejemplo: *350*");
                     return;
                 }
                 $sesion['cantidad'] = $texto;
                 $sesion['paso']     = 'descripcion';
                 $this->setSesion($chatId, $sesion);
-                $this->sendMessage($chatId, "Descripcion? (o escribe omitir)");
+                $this->sendMessage($chatId, "📄 ¿Descripción? (o escribe *omitir*)");
                 break;
 
             case 'descripcion':
                 $sesion['descripcion'] = $omitir ? null : $texto;
 
-                // pago_tarjeta no tiene categoria, subcategoria ni proyecto
+                // pago_tarjeta no tiene categoría, subcategoría ni proyecto
                 if ($sesion['tipo'] === 'pago_tarjeta') {
                     $sesion['paso'] = 'fecha';
                     $this->setSesion($chatId, $sesion);
-                    $this->sendMessage($chatId, "Fecha? Escribe hoy o una fecha (ejemplo: 2026-05-15)");
+                    $this->sendMessage($chatId, "📅 ¿Fecha? Escribe *hoy* o una fecha (ejemplo: 2026-05-15)");
                 } else {
                     $sesion['paso'] = 'categoria';
                     $this->setSesion($chatId, $sesion);
-                    $this->sendMessage($chatId, "Categoria? (o escribe omitir)");
+                    $this->sendMessage($chatId, "🏷️ ¿Categoría? (o escribe *omitir*)");
                 }
                 break;
 
@@ -278,21 +289,21 @@ class TelegramController extends Controller
                 $sesion['categoria'] = $omitir ? null : $texto;
                 $sesion['paso']      = 'subcategoria';
                 $this->setSesion($chatId, $sesion);
-                $this->sendMessage($chatId, "Subcategoria? (o escribe omitir)");
+                $this->sendMessage($chatId, "🏷️ ¿Subcategoría? (o escribe *omitir*)");
                 break;
 
             case 'subcategoria':
                 $sesion['subcategoria'] = $omitir ? null : $texto;
                 $sesion['paso']         = 'proyecto';
                 $this->setSesion($chatId, $sesion);
-                $this->sendMessage($chatId, "Proyecto? (o escribe omitir)");
+                $this->sendMessage($chatId, "📁 ¿Proyecto? (o escribe *omitir*)");
                 break;
 
             case 'proyecto':
                 $sesion['proyecto'] = $omitir ? null : $texto;
                 $sesion['paso']     = 'fecha';
                 $this->setSesion($chatId, $sesion);
-                $this->sendMessage($chatId, "Fecha? Escribe hoy o una fecha (ejemplo: 2026-05-15)");
+                $this->sendMessage($chatId, "📅 ¿Fecha? Escribe *hoy* o una fecha (ejemplo: 2026-05-15)");
                 break;
 
             case 'fecha':
@@ -300,7 +311,7 @@ class TelegramController extends Controller
                     $sesion['fecha'] = now()->toDateString();
                 } else {
                     if (!strtotime($texto)) {
-                        $this->sendMessage($chatId, "Fecha invalida. Escribe hoy o una fecha como 2026-05-15");
+                        $this->sendMessage($chatId, "⚠️ Fecha inválida. Escribe *hoy* o una fecha como *2026-05-15*");
                         return;
                     }
                     $sesion['fecha'] = date('Y-m-d', strtotime($texto));
@@ -328,12 +339,12 @@ class TelegramController extends Controller
             if ($response->successful()) {
                 $tipo     = ucfirst($sesion['tipo']);
                 $cantidad = number_format($sesion['cantidad'], 2);
-                $this->sendMessage($chatId, "$tipo de $$cantidad registrado correctamente\nFecha: {$sesion['fecha']}");
+                $this->sendMessage($chatId, "✅ *$tipo de \$$cantidad registrado correctamente*\n📅 Fecha: {$sesion['fecha']}");
             } else {
-                $this->sendMessage($chatId, "No se pudo guardar el movimiento. Intenta de nuevo.");
+                $this->sendMessage($chatId, "⚠️ No se pudo guardar el movimiento. Intenta de nuevo.");
             }
         } catch (\Exception $e) {
-            $this->sendMessage($chatId, "No se pudo conectar con el servidor. Intenta de nuevo.");
+            $this->sendMessage($chatId, "⚠️ No se pudo conectar con el servidor. Intenta de nuevo.");
         }
 
         $this->borrarSesion($chatId);
@@ -366,7 +377,7 @@ class TelegramController extends Controller
 
     // ─────────────────────────────────────────────────────
     // TELEGRAM
-    // Envia un mensaje al usuario.
+    // Envía un mensaje al usuario.
     // ─────────────────────────────────────────────────────
 
     private function sendMessage($chatId, $text)
