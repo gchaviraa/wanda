@@ -2,10 +2,10 @@
 
 namespace App\Http\Controllers;
 
+use App\Prompts\WandaPrompt;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
-
 
 class TelegramController extends Controller
 {
@@ -22,7 +22,328 @@ class TelegramController extends Controller
         $this->geminiKey  = config('app.gemini_api_key');
     }
 
-    // ── Sesiones ──────────────────────────────────────────
+    // ─────────────────────────────────────────────────────
+    // WEBHOOK PRINCIPAL
+    // Punto de entrada de todos los mensajes de Telegram.
+    // ─────────────────────────────────────────────────────
+
+    public function webhook(Request $request)
+    {
+        $message = $request->input('message');
+        if (!$message) return response()->json(['ok' => true]);
+
+        $chatId = $message['chat']['id'];
+
+        // Verificar que el usuario esté en la lista de permitidos
+        $allowedUsers = array_filter(explode(',', env('ALLOWED_USERS', '')));
+        if (!empty($allowedUsers) && !in_array((string)$chatId, $allowedUsers)) {
+            $this->sendMessage($chatId, "No tienes acceso a Wanda.");
+            return response()->json(['ok' => true]);
+        }
+
+        $texto = trim($message['text'] ?? '');
+
+        // "cancelar" termina cualquier flujo activo
+        if (strtolower($texto) === 'cancelar') {
+            $this->borrarSesion($chatId);
+            $this->sendMessage($chatId, "Operación cancelada.");
+            return response()->json(['ok' => true]);
+        }
+
+        // Si hay un cuestionario en curso, continuar con él
+        $sesion = $this->getSesion($chatId);
+        if ($sesion && $sesion['flujo'] === 'nuevo_movimiento') {
+            $this->procesarMovimiento($chatId, $texto, $sesion);
+            return response()->json(['ok' => true]);
+        }
+
+        // Pedirle a Gemini que interprete el mensaje
+        $resultado = $this->preguntarGemini($texto);
+        $accion    = $resultado['accion'];
+
+        // Determinar mes y año (actual por defecto, o el que extrajo Gemini)
+        $mes  = $resultado['mes'] ?? now()->month;
+        $anio = $resultado['anio'] ?? now()->year;
+
+        // Si dijo "mes pasado", calcularlo en PHP
+        if ($resultado['mes_relativo'] ?? false) {
+            $mes  = now()->subMonth()->month;
+            $anio = now()->subMonth()->year;
+        }
+
+        switch ($accion) {
+            case 'resumen':
+                $this->responderResumen($chatId, $mes, $anio);
+                break;
+
+            case 'nuevo_movimiento':
+                $this->setSesion($chatId, ['flujo' => 'nuevo_movimiento', 'paso' => 'tipo']);
+                $this->sendMessage($chatId, "Nuevo movimiento\n\nQue tipo es?\n\nEscribe ingreso, gasto o pago_tarjeta\n\n(Escribe cancelar en cualquier momento para salir)");
+                break;
+
+            case 'inventario':
+                if (empty($resultado['busqueda'])) {
+                    $this->sendMessage($chatId, "Que componente quieres buscar?");
+                } else {
+                    $this->responderInventario($chatId, $resultado['busqueda']);
+                }
+                break;
+
+            default:
+                $this->sendMessage($chatId, "Hola, soy Wanda\n\nPuedo ayudarte con:\n\n- Ver resumen: ingresos y gastos del mes\n- Nuevo movimiento: registrar un ingreso o gasto\n- Inventario: buscar stock de componentes\n\n(Escribe cancelar para cancelar cualquier operacion)");
+        }
+
+        return response()->json(['ok' => true]);
+    }
+
+    // ─────────────────────────────────────────────────────
+    // GEMINI
+    // Interpreta el mensaje del usuario y decide que hacer.
+    // ─────────────────────────────────────────────────────
+
+    private function preguntarGemini($mensaje)
+    {
+        $prompt = WandaPrompt::clasificar($mensaje, now()->format('d/m/Y'));
+
+        try {
+            $response = Http::timeout(10)->post(
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={$this->geminiKey}",
+                ['contents' => [['parts' => [['text' => $prompt]]]]]
+            );
+
+            $texto = $response->json()['candidates'][0]['content']['parts'][0]['text'] ?? '{"accion":"desconocido"}';
+            $texto = trim(str_replace(['```json', '```'], '', $texto));
+            $data  = json_decode($texto, true);
+
+            return [
+                'accion'       => $data['accion']      ?? 'desconocido',
+                'mes'          => $data['mes']          ?? null,
+                'anio'         => $data['anio']         ?? null,
+                'mes_relativo' => $data['mes_relativo'] ?? false,
+                'busqueda'     => $data['busqueda']     ?? null,
+            ];
+
+        } catch (\Exception $e) {
+            logger('Gemini error: ' . $e->getMessage());
+            return ['accion' => 'desconocido', 'mes' => null, 'anio' => null, 'mes_relativo' => false, 'busqueda' => null];
+        }
+    }
+
+    private function generarComentario($data)
+    {
+        $prompt = WandaPrompt::comentarioResumen($data);
+
+        try {
+            $response = Http::timeout(10)->post(
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={$this->geminiKey}",
+                ['contents' => [['parts' => [['text' => $prompt]]]]]
+            );
+
+            return trim($response->json()['candidates'][0]['content']['parts'][0]['text'] ?? '');
+
+        } catch (\Exception $e) {
+            return '';
+        }
+    }
+
+    // ─────────────────────────────────────────────────────
+    // RESUMEN MENSUAL
+    // Consulta la API de eptech y responde con los totales.
+    // ─────────────────────────────────────────────────────
+
+    private function responderResumen($chatId, $mes = null, $anio = null)
+    {
+        $mes  = $mes  ?? now()->month;
+        $anio = $anio ?? now()->year;
+
+        try {
+            $response = Http::timeout(10)->withHeaders([
+                'X-Wanda-Token' => $this->wandaToken,
+            ])->get("{$this->wandaUrl}/api/wanda/resumen", [
+                'mes'  => $mes,
+                'anio' => $anio,
+            ]);
+
+            if (!$response->successful()) {
+                $this->sendMessage($chatId, "No pude conectar con la base de datos. Verifica que el servidor este activo e intenta de nuevo.");
+                return;
+            }
+
+            $data         = $response->json();
+            $ingresos     = number_format($data['ingresos'], 2);
+            $gastos       = number_format($data['gastos'], 2);
+            $saldoTarjeta = number_format($data['saldo_tarjeta'], 2);
+            $balance      = number_format($data['balance'], 2);
+
+            $comentario = $this->generarComentario($data);
+
+            $this->sendMessage($chatId, "$comentario\n\nResumen de {$data['periodo']}\n\nIngresos: $$ingresos\nGastos: $$gastos\nSaldo tarjeta: $$saldoTarjeta\nBalance: $$balance");
+
+        } catch (\Exception $e) {
+            $this->sendMessage($chatId, "No pude conectar con la base de datos. Verifica que el servidor este activo e intenta de nuevo.");
+        }
+    }
+
+    // ─────────────────────────────────────────────────────
+    // INVENTARIO
+    // Busca componentes por nombre o numero de parte.
+    // ─────────────────────────────────────────────────────
+
+    private function responderInventario($chatId, $busqueda)
+    {
+        try {
+            $response = Http::timeout(10)->withHeaders([
+                'X-Wanda-Token' => $this->wandaToken,
+            ])->get("{$this->wandaUrl}/api/wanda/inventario", [
+                'q' => $busqueda,
+            ]);
+
+            if (!$response->successful()) {
+                $this->sendMessage($chatId, "No pude conectar con la base de datos. Intenta de nuevo.");
+                return;
+            }
+
+            $data = $response->json();
+
+            if ($data['total'] === 0) {
+                $this->sendMessage($chatId, "No encontre ningun componente para \"$busqueda\".");
+                return;
+            }
+
+            $texto = "Resultados para \"$busqueda\" ({$data['total']} encontrados)\n\n";
+
+            foreach ($data['resultados'] as $item) {
+                $texto .= "{$item['componente']}\n";
+                $texto .= "Num: {$item['num_componente']}\n";
+                $texto .= "Stock: {$item['stock']} | Caja: {$item['caja_locacion']}\n";
+                $texto .= "Proveedor: {$item['proveedor']}\n\n";
+            }
+
+            $this->sendMessage($chatId, $texto);
+
+        } catch (\Exception $e) {
+            $this->sendMessage($chatId, "No pude conectar con la base de datos. Intenta de nuevo.");
+        }
+    }
+
+    // ─────────────────────────────────────────────────────
+    // NUEVO MOVIMIENTO
+    // Cuestionario paso a paso para registrar un movimiento.
+    // ─────────────────────────────────────────────────────
+
+    private function procesarMovimiento($chatId, $texto, $sesion)
+    {
+        $omitir = strtolower($texto) === 'omitir';
+
+        switch ($sesion['paso']) {
+            case 'tipo':
+                $tipo = strtolower($texto);
+                if (!in_array($tipo, ['ingreso', 'gasto', 'pago_tarjeta'])) {
+                    $this->sendMessage($chatId, "Escribe ingreso, gasto o pago_tarjeta.");
+                    return;
+                }
+                $sesion['tipo'] = $tipo;
+                $sesion['paso'] = 'cantidad';
+                $this->setSesion($chatId, $sesion);
+                $this->sendMessage($chatId, "Cuanto? (solo el numero, ejemplo: 350)");
+                break;
+
+            case 'cantidad':
+                if (!is_numeric($texto) || $texto <= 0) {
+                    $this->sendMessage($chatId, "Escribe solo el monto, ejemplo: 350");
+                    return;
+                }
+                $sesion['cantidad'] = $texto;
+                $sesion['paso']     = 'descripcion';
+                $this->setSesion($chatId, $sesion);
+                $this->sendMessage($chatId, "Descripcion? (o escribe omitir)");
+                break;
+
+            case 'descripcion':
+                $sesion['descripcion'] = $omitir ? null : $texto;
+
+                // pago_tarjeta no tiene categoria, subcategoria ni proyecto
+                if ($sesion['tipo'] === 'pago_tarjeta') {
+                    $sesion['paso'] = 'fecha';
+                    $this->setSesion($chatId, $sesion);
+                    $this->sendMessage($chatId, "Fecha? Escribe hoy o una fecha (ejemplo: 2026-05-15)");
+                } else {
+                    $sesion['paso'] = 'categoria';
+                    $this->setSesion($chatId, $sesion);
+                    $this->sendMessage($chatId, "Categoria? (o escribe omitir)");
+                }
+                break;
+
+            case 'categoria':
+                $sesion['categoria'] = $omitir ? null : $texto;
+                $sesion['paso']      = 'subcategoria';
+                $this->setSesion($chatId, $sesion);
+                $this->sendMessage($chatId, "Subcategoria? (o escribe omitir)");
+                break;
+
+            case 'subcategoria':
+                $sesion['subcategoria'] = $omitir ? null : $texto;
+                $sesion['paso']         = 'proyecto';
+                $this->setSesion($chatId, $sesion);
+                $this->sendMessage($chatId, "Proyecto? (o escribe omitir)");
+                break;
+
+            case 'proyecto':
+                $sesion['proyecto'] = $omitir ? null : $texto;
+                $sesion['paso']     = 'fecha';
+                $this->setSesion($chatId, $sesion);
+                $this->sendMessage($chatId, "Fecha? Escribe hoy o una fecha (ejemplo: 2026-05-15)");
+                break;
+
+            case 'fecha':
+                if (strtolower($texto) === 'hoy') {
+                    $sesion['fecha'] = now()->toDateString();
+                } else {
+                    if (!strtotime($texto)) {
+                        $this->sendMessage($chatId, "Fecha invalida. Escribe hoy o una fecha como 2026-05-15");
+                        return;
+                    }
+                    $sesion['fecha'] = date('Y-m-d', strtotime($texto));
+                }
+                $this->guardarMovimiento($chatId, $sesion);
+                break;
+        }
+    }
+
+    private function guardarMovimiento($chatId, $sesion)
+    {
+        try {
+            $response = Http::timeout(10)->withHeaders([
+                'X-Wanda-Token' => $this->wandaToken,
+            ])->post("{$this->wandaUrl}/api/wanda/movimiento", [
+                'tipo'         => $sesion['tipo'],
+                'cantidad'     => $sesion['cantidad'],
+                'fecha'        => $sesion['fecha'],
+                'descripcion'  => $sesion['descripcion']  ?? null,
+                'categoria'    => $sesion['categoria']    ?? null,
+                'subcategoria' => $sesion['subcategoria'] ?? null,
+                'proyecto'     => $sesion['proyecto']     ?? null,
+            ]);
+
+            if ($response->successful()) {
+                $tipo     = ucfirst($sesion['tipo']);
+                $cantidad = number_format($sesion['cantidad'], 2);
+                $this->sendMessage($chatId, "$tipo de $$cantidad registrado correctamente\nFecha: {$sesion['fecha']}");
+            } else {
+                $this->sendMessage($chatId, "No se pudo guardar el movimiento. Intenta de nuevo.");
+            }
+        } catch (\Exception $e) {
+            $this->sendMessage($chatId, "No se pudo conectar con el servidor. Intenta de nuevo.");
+        }
+
+        $this->borrarSesion($chatId);
+    }
+
+    // ─────────────────────────────────────────────────────
+    // SESIONES
+    // Guarda el estado del cuestionario en un archivo JSON.
+    // ─────────────────────────────────────────────────────
+
     private function getSesion($chatId)
     {
         $data = json_decode(Storage::get('sesiones.json') ?? '{}', true);
@@ -43,354 +364,11 @@ class TelegramController extends Controller
         Storage::put('sesiones.json', json_encode($data));
     }
 
-    // ── Gemini ────────────────────────────────────────────
-    private function preguntarGemini($mensaje)
-    {
-        $prompt = <<<EOT
-        Eres el asistente Wanda. Analiza el siguiente mensaje del usuario y responde ÚNICAMENTE con un JSON con esta estructura:
+    // ─────────────────────────────────────────────────────
+    // TELEGRAM
+    // Envia un mensaje al usuario.
+    // ─────────────────────────────────────────────────────
 
-        {
-        "accion": "resumen" | "nuevo_movimiento" | "inventario" | "desconocido",
-        "mes": null | número del mes (1-12),
-        "anio": null | año (ejemplo: 2026),
-        "mes_relativo": false | true,
-        "busqueda": null | texto a buscar en inventario
-        }
-
-        Reglas:
-        - "accion" es "resumen" si el usuario quiere ver ingresos, gastos, balance o resumen
-        - "accion" es "nuevo_movimiento" si el usuario quiere registrar, agregar o crear un ingreso o gasto
-        - "accion" es "inventario" si el usuario pregunta por stock, componentes, partes o inventario
-        - "accion" es "desconocido" si no entiendes qué quiere
-        - "mes" y "anio" solo si el usuario menciona un mes o año específico, si no ponlos en null
-        - "mes_relativo" es true si el usuario dice "mes pasado", "el mes anterior" o similar
-        - "busqueda" debe contener solo el término técnico a buscar, sin palabras como "busca", "capacitores", "componente", "tienes", "hay", etc.
-        - Si el usuario busca por especificaciones técnicas extrae solo esas: "25V", "10uF 100V", "100V", etc.
-        - Si el usuario busca por número de componente extrae solo el número: "C-001", "UKL2A100MPD1AA", etc.
-        - La fecha actual es: EOT . now()->format('d/m/Y') . <<<EOT
-
-        Ejemplos:
-        - "cómo vamos este mes" → {"accion":"resumen","mes":null,"anio":null,"mes_relativo":false,"busqueda":null}
-        - "resumen de abril" → {"accion":"resumen","mes":4,"anio":2026,"mes_relativo":false,"busqueda":null}
-        - "resumen del mes pasado" → {"accion":"resumen","mes":null,"anio":null,"mes_relativo":true,"busqueda":null}
-        - "cuántos 10uF 100V tenemos" → {"accion":"inventario","mes":null,"anio":null,"mes_relativo":false,"busqueda":"10uF 100V"}
-        - "busca capacitores de 25V" → {"accion":"inventario","mes":null,"anio":null,"mes_relativo":false,"busqueda":"25V"}
-        - "tienes capacitores de 10uF 100V" → {"accion":"inventario","mes":null,"anio":null,"mes_relativo":false,"busqueda":"10uF 100V"}
-        - "stock del UKL2A100MPD1AA" → {"accion":"inventario","mes":null,"anio":null,"mes_relativo":false,"busqueda":"UKL2A100MPD1AA"}
-        - "quiero registrar un gasto" → {"accion":"nuevo_movimiento","mes":null,"anio":null,"mes_relativo":false,"busqueda":null}
-
-        Mensaje del usuario: "$mensaje"
-
-        Responde SOLO con el JSON, sin explicaciones.
-        EOT;
-        try {
-            $response = Http::timeout(10)->post(
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={$this->geminiKey}",
-                [
-                    'contents' => [
-                        ['parts' => [['text' => $prompt]]]
-                    ]
-                ]
-            );
-
-            $texto = $response->json()['candidates'][0]['content']['parts'][0]['text'] ?? '{"accion":"desconocido","mes":null,"anio":null}';
-            $texto = trim(str_replace(['```json', '```'], '', $texto));
-            $data  = json_decode($texto, true);
-
-            return [
-                'accion'       => $data['accion'] ?? 'desconocido',
-                'mes'          => $data['mes'] ?? null,
-                'anio'         => $data['anio'] ?? null,
-                'mes_relativo' => $data['mes_relativo'] ?? false,
-                'busqueda'     => $data['busqueda'] ?? null,
-            ];
-
-        } catch (\Exception $e) {
-            logger('Gemini error: ' . $e->getMessage());
-            return ['accion' => 'desconocido', 'mes' => null, 'anio' => null, 'mes_relativo' => false];
-        }
-    }
-
-    // ── Webhook principal ─────────────────────────────────
-    public function webhook(Request $request)
-    {
-        $message = $request->input('message');
-        if (!$message) return response()->json(['ok' => true]);
-
-        $chatId = $message['chat']['id'];
-
-        // Verificar usuario permitido
-        $allowedUsers = array_filter(explode(',', env('ALLOWED_USERS', '')));
-        if (!empty($allowedUsers) && !in_array((string)$chatId, $allowedUsers)) {
-            $this->sendMessage($chatId, "No tienes acceso a Wanda.");
-            return response()->json(['ok' => true]);
-        }
-
-        $texto = trim($message['text'] ?? '');
-
-        // Cancelar en cualquier momento
-        if (strtolower($texto) === 'cancelar') {
-            $this->borrarSesion($chatId);
-            $this->sendMessage($chatId, "❌ Operación cancelada.");
-            return response()->json(['ok' => true]);
-        }
-
-        // Ver si hay una sesión activa
-        $sesion = $this->getSesion($chatId);
-
-        if ($sesion && $sesion['flujo'] === 'nuevo_movimiento') {
-            $this->procesarMovimiento($chatId, $texto, $sesion);
-            return response()->json(['ok' => true]);
-        }
-
-        $resultado = $this->preguntarGemini($texto);
-        logger('Gemini resultado: ' . json_encode($resultado));
-        $accion    = $resultado['accion'];
-
-        // Si Gemini no extrajo mes/año, usar el actual
-        $mes  = $resultado['mes'] ?? now()->month;
-        $anio = $resultado['anio'] ?? now()->year;
-
-        // Manejar "mes pasado" en PHP directamente
-        if ($resultado['mes_relativo'] ?? false) {
-            $fecha = now()->subMonth();
-            $mes   = $fecha->month;
-            $anio  = $fecha->year;
-        }
-
-        switch ($accion) {
-            case 'resumen':
-                $this->responderResumen($chatId, $mes, $anio);
-                break;
-
-            case 'nuevo_movimiento':
-                $this->setSesion($chatId, ['flujo' => 'nuevo_movimiento', 'paso' => 'tipo']);
-                $this->sendMessage($chatId, "📝 *Nuevo movimiento*\n\n¿Qué tipo es?\n\nEscribe *ingreso*, *gasto* o *pago_tarjeta*\n\n_(Escribe *cancelar* en cualquier momento para salir)_");
-                break;
-            case 'inventario':
-                if (empty($resultado['busqueda'])) {
-                    $this->sendMessage($chatId, "¿Qué componente quieres buscar?");
-                } else {
-                    $this->responderInventario($chatId, $resultado['busqueda']);
-                }
-                break;
-            default:
-                $this->sendMessage($chatId, "Hola, soy Wanda 👋\n\nPuedo ayudarte con:\n\n📊 *Ver resumen* — ingresos y gastos del mes\n📝 *Nuevo movimiento* — registrar un ingreso o gasto\n\n_(Escribe *cancelar* para cancelar cualquier operación)_");
-        }
-
-        return response()->json(['ok' => true]);
-    }
-
-    private function responderInventario($chatId, $busqueda)
-    {
-        try {
-            $response = Http::timeout(10)->withHeaders([
-                'X-Wanda-Token' => $this->wandaToken,
-            ])->get("{$this->wandaUrl}/api/wanda/inventario", [
-                'q' => $busqueda,
-            ]);
-
-            if (!$response->successful()) {
-                $this->sendMessage($chatId, "⚠️ No pude conectar con la base de datos. Intenta de nuevo.");
-                return;
-            }
-
-            $data = $response->json();
-
-            if ($data['total'] === 0) {
-                $this->sendMessage($chatId, "No encontré ningún componente para \"$busqueda\".");
-                return;
-            }
-
-            $texto = "🔍 *Resultados para \"$busqueda\"* ({$data['total']} encontrados)\n\n";
-
-            foreach ($data['resultados'] as $item) {
-                $texto .= "📦 *{$item['componente']}*\n";
-                $texto .= "Num: `{$item['num_componente']}`\n";
-                $texto .= "Stock: {$item['stock']} | Caja: {$item['caja_locacion']}\n";
-                $texto .= "Proveedor: {$item['proveedor']}\n\n";
-            }
-
-            $this->sendMessage($chatId, $texto);
-
-        } catch (\Exception $e) {
-            $this->sendMessage($chatId, "⚠️ No pude conectar con la base de datos. Intenta de nuevo.");
-        }
-    }
-
-    // ── Flujo nuevo movimiento ────────────────────────────
-    private function procesarMovimiento($chatId, $texto, $sesion)
-    {
-        $omitir = strtolower($texto) === 'omitir';
-
-        switch ($sesion['paso']) {
-            case 'tipo':
-                $tipo = strtolower($texto);
-                if (!in_array($tipo, ['ingreso', 'gasto', 'pago_tarjeta'])) {
-                    $this->sendMessage($chatId, "⚠️ Escribe *ingreso*, *gasto* o *pago_tarjeta*.");
-                    return;
-                }
-                $sesion['tipo'] = $tipo;
-                $sesion['paso'] = 'cantidad';
-                $this->setSesion($chatId, $sesion);
-                $this->sendMessage($chatId, "💰 ¿Cuánto? (solo el número, ejemplo: 350)");
-                break;
-
-            case 'cantidad':
-                if (!is_numeric($texto) || $texto <= 0) {
-                    $this->sendMessage($chatId, "⚠️ Escribe solo el monto, ejemplo: *350*");
-                    return;
-                }
-                $sesion['cantidad'] = $texto;
-                $sesion['paso']     = 'descripcion';
-                $this->setSesion($chatId, $sesion);
-                $this->sendMessage($chatId, "📄 ¿Descripción? (o escribe *omitir*)");
-                break;
-
-            case 'descripcion':
-                $sesion['descripcion'] = $omitir ? null : $texto;
-
-                if ($sesion['tipo'] === 'pago_tarjeta') {
-                    $sesion['paso'] = 'fecha';
-                    $this->setSesion($chatId, $sesion);
-                    $this->sendMessage($chatId, "📅 ¿Fecha? Escribe *hoy* o una fecha (ejemplo: 2026-05-15)");
-                } else {
-                    $sesion['paso'] = 'categoria';
-                    $this->setSesion($chatId, $sesion);
-                    $this->sendMessage($chatId, "🏷️ ¿Categoría? (o escribe *omitir*)");
-                }
-                break;
-
-            case 'categoria':
-                $sesion['categoria'] = $omitir ? null : $texto;
-                $sesion['paso']      = 'subcategoria';
-                $this->setSesion($chatId, $sesion);
-                $this->sendMessage($chatId, "🏷️ ¿Subcategoría? (o escribe *omitir*)");
-                break;
-
-            case 'subcategoria':
-                $sesion['subcategoria'] = $omitir ? null : $texto;
-                $sesion['paso']         = 'proyecto';
-                $this->setSesion($chatId, $sesion);
-                $this->sendMessage($chatId, "📁 ¿Proyecto? (o escribe *omitir*)");
-                break;
-
-            case 'proyecto':
-                $sesion['proyecto'] = $omitir ? null : $texto;
-                $sesion['paso']     = 'fecha';
-                $this->setSesion($chatId, $sesion);
-                $this->sendMessage($chatId, "📅 ¿Fecha? Escribe *hoy* o una fecha (ejemplo: 2026-05-15)");
-                break;
-
-            case 'fecha':
-                if (strtolower($texto) === 'hoy') {
-                    $sesion['fecha'] = now()->toDateString();
-                } else {
-                    if (!strtotime($texto)) {
-                        $this->sendMessage($chatId, "⚠️ Fecha inválida. Escribe *hoy* o una fecha como *2026-05-15*");
-                        return;
-                    }
-                    $sesion['fecha'] = date('Y-m-d', strtotime($texto));
-                }
-                $this->guardarMovimiento($chatId, $sesion);
-                break;
-        }
-    }
-
-    // ── Guardar movimiento via API ────────────────────────
-    private function guardarMovimiento($chatId, $sesion)
-    {
-        try {
-            $response = Http::timeout(10)->withHeaders([
-                'X-Wanda-Token' => $this->wandaToken,
-            ])->post("{$this->wandaUrl}/api/wanda/movimiento", [
-                'tipo'         => $sesion['tipo'],
-                'cantidad'     => $sesion['cantidad'],
-                'fecha'        => $sesion['fecha'],
-                'descripcion'  => $sesion['descripcion'] ?? null,
-                'categoria'    => $sesion['categoria'] ?? null,
-                'subcategoria' => $sesion['subcategoria'] ?? null,
-                'proyecto'     => $sesion['proyecto'] ?? null,
-            ]);
-
-            if ($response->successful()) {
-                $tipo     = ucfirst($sesion['tipo']);
-                $cantidad = number_format($sesion['cantidad'], 2);
-                $fecha    = $sesion['fecha'];
-                $this->sendMessage($chatId, "✅ *$tipo de \$$cantidad registrado correctamente*\n📅 Fecha: $fecha");
-            } else {
-                $this->sendMessage($chatId, "⚠️ No se pudo guardar el movimiento. Intenta de nuevo.");
-            }
-        } catch (\Exception $e) {
-            $this->sendMessage($chatId, "⚠️ No se pudo conectar con el servidor. Intenta de nuevo.");
-        }
-
-        $this->borrarSesion($chatId);
-    }
-
-    // ── Resumen mensual ───────────────────────────────────
-    private function responderResumen($chatId, $mes = null, $anio = null)
-    {
-        $mes  = $mes  ?? now()->month;
-        $anio = $anio ?? now()->year;
-
-        try {
-            $response = Http::timeout(10)->withHeaders([
-                'X-Wanda-Token' => $this->wandaToken,
-            ])->get("{$this->wandaUrl}/api/wanda/resumen", [
-                'mes'  => $mes,
-                'anio' => $anio,
-            ]);
-
-            if (!$response->successful()) {
-                $this->sendMessage($chatId, "⚠️ No pude conectar con la base de datos. Verifica que el servidor esté activo e intenta de nuevo.");
-                return;
-            }
-
-            $data         = $response->json();
-            $ingresos     = number_format($data['ingresos'], 2);
-            $gastos       = number_format($data['gastos'], 2);
-            $saldoTarjeta = number_format($data['saldo_tarjeta'], 2);
-            $balance      = number_format($data['balance'], 2);
-
-            // Pedirle a Gemini un comentario sobre los datos
-            $comentario = $this->generarComentario($data);
-
-            $this->sendMessage($chatId, "$comentario\n\n📊 *Resumen de {$data['periodo']}*\n\n✅ Ingresos: \$$ingresos\n❌ Gastos: \$$gastos\n💳 Saldo tarjeta: \$$saldoTarjeta\n💰 Balance: \$$balance");
-
-        } catch (\Exception $e) {
-            $this->sendMessage($chatId, "⚠️ No pude conectar con la base de datos. Verifica que el servidor esté activo e intenta de nuevo.");
-        }
-    }
-
-    private function generarComentario($data)
-    {
-        $prompt = "Eres Wanda, un asistente de negocios. Con base en estos datos financieros del período {$data['periodo']}, escribe UN comentario corto (máximo 2 oraciones) en español sobre cómo va el negocio. Sé directo y útil. No uses emojis ni formato markdown.
-
-    Datos:
-    - Ingresos: \${$data['ingresos']}
-    - Gastos: \${$data['gastos']}
-    - Saldo tarjeta pendiente: \${$data['saldo_tarjeta']}
-    - Balance: \${$data['balance']}";
-
-        try {
-            $response = Http::timeout(10)->post(
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={$this->geminiKey}",
-                [
-                    'contents' => [
-                        ['parts' => [['text' => $prompt]]]
-                    ]
-                ]
-            );
-
-            return trim($response->json()['candidates'][0]['content']['parts'][0]['text'] ?? '');
-
-        } catch (\Exception $e) {
-            return '';
-        }
-    }
-
-    // ── Enviar mensaje ────────────────────────────────────
     private function sendMessage($chatId, $text)
     {
         Http::post("https://api.telegram.org/bot{$this->token}/sendMessage", [
