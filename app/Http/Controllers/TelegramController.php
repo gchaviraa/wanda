@@ -392,6 +392,7 @@ class TelegramController extends Controller
             $this->sendMessage($chatId, "✅ Se $accion unidades de *{$data['componente']}*\n📦 Stock anterior: {$data['stock_antes']}\n📦 Stock actual: {$data['stock_ahora']}");
 
         } catch (\Exception $e) {
+            logger('modificarStock error: ' . $e->getMessage());
             $this->sendMessage($chatId, "⚠️ No se pudo conectar con el servidor. Intenta de nuevo.");
         }
     }
