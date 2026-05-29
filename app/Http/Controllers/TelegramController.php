@@ -88,7 +88,13 @@ class TelegramController extends Controller
                     $this->responderInventario($chatId, $resultado['busqueda']);
                 }
                 break;
-
+            case 'modificar_stock':
+                if (empty($resultado['num_componente']) || $resultado['cantidad_stock'] === null) {
+                    $this->sendMessage($chatId, "⚠️ Necesito el número de componente y la cantidad. Ejemplo: *agrega 5 al IRFB4227PBF*");
+                } else {
+                    $this->modificarStock($chatId, $resultado['num_componente'], $resultado['cantidad_stock']);
+                }
+                break;
             default:
                 $this->sendMessage($chatId, "👋 Hola, soy Wanda\n\nPuedo ayudarte con:\n\n📊 *Ver resumen* — ingresos y gastos del mes\n📝 *Nuevo movimiento* — registrar un ingreso o gasto\n🔍 *Inventario* — buscar stock de componentes\n\n_(Escribe *cancelar* para cancelar cualquier operación)_");
         }
@@ -121,6 +127,8 @@ class TelegramController extends Controller
                 'anio'         => $data['anio']         ?? null,
                 'mes_relativo' => $data['mes_relativo'] ?? false,
                 'busqueda'     => $data['busqueda']     ?? null,
+                'num_componente'  => $data['num_componente']  ?? null,
+                'cantidad_stock'  => $data['cantidad_stock']  ?? null,
             ];
 
             //logger('Gemini resultado: ' . json_encode($resultado));
@@ -348,6 +356,44 @@ class TelegramController extends Controller
         }
 
         $this->borrarSesion($chatId);
+    }
+
+    // ─────────────────────────────────────────────────────
+    // MODIFICAR STOCK
+    // Agrega o quita unidades de un componente del inventario.
+    // ─────────────────────────────────────────────────────
+
+    private function modificarStock($chatId, $numComponente, $cantidad)
+    {
+        try {
+            $response = Http::timeout(10)->withHeaders([
+                'X-Wanda-Token' => $this->wandaToken,
+            ])->post("{$this->wandaUrl}/api/wanda/inventario/stock", [
+                'num_componente' => $numComponente,
+                'cantidad'       => $cantidad,
+            ]);
+
+            if (!$response->successful()) {
+                $data = $response->json();
+
+                if (isset($data['error']) && $data['error'] === 'Stock insuficiente') {
+                    $this->sendMessage($chatId, "⚠️ Stock insuficiente. Stock actual: {$data['stock_actual']}");
+                } elseif (isset($data['error']) && $data['error'] === 'Componente no encontrado') {
+                    $this->sendMessage($chatId, "⚠️ No encontré el componente *$numComponente*.");
+                } else {
+                    $this->sendMessage($chatId, "⚠️ No se pudo modificar el stock. Intenta de nuevo.");
+                }
+                return;
+            }
+
+            $data      = $response->json();
+            $accion    = $cantidad > 0 ? "agregaron $cantidad" : "quitaron " . abs($cantidad);
+
+            $this->sendMessage($chatId, "✅ Se $accion unidades de *{$data['componente']}*\n📦 Stock anterior: {$data['stock_antes']}\n📦 Stock actual: {$data['stock_ahora']}");
+
+        } catch (\Exception $e) {
+            $this->sendMessage($chatId, "⚠️ No se pudo conectar con el servidor. Intenta de nuevo.");
+        }
     }
 
     // ─────────────────────────────────────────────────────
