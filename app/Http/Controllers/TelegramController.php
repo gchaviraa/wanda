@@ -95,8 +95,11 @@ class TelegramController extends Controller
                     $this->modificarStock($chatId, $resultado['num_componente'], $resultado['cantidad_stock']);
                 }
                 break;
+            case 'resumen_anual':
+                $this->responderResumenAnual($chatId, $anio, $resultado['categoria']);
+                break;
             default:
-                $this->sendMessage($chatId, "👋 Hola, soy Wanda\n\nPuedo ayudarte con:\n\n📊 *Ver resumen* — ingresos y gastos del mes\n📝 *Nuevo movimiento* — registrar un ingreso o gasto\n🔍 *Inventario* — buscar stock de componentes\n\n_(Escribe *cancelar* para cancelar cualquier operación)_");
+                $this->sendMessage($chatId, "👋 Hola, soy Wanda\n\nPuedo ayudarte con:\n\n📊 *Ver resumen* — ingresos y gastos del mes o del año\n📝 *Nuevo movimiento* — registrar un ingreso o gasto\n🔍 *Inventario* — buscar stock de componentes\n📦 *Modificar stock* — agregar o quitar unidades\n\n_(Escribe *cancelar* para cancelar cualquier operación)_");
         }
 
         return response()->json(['ok' => true]);
@@ -129,6 +132,7 @@ class TelegramController extends Controller
                 'busqueda'     => $data['busqueda']     ?? null,
                 'num_componente'  => $data['num_componente']  ?? null,
                 'cantidad_stock'  => $data['cantidad_stock']  ?? null,
+                'categoria'       => $data['categoria']       ?? null,
             ];
 
             //logger('Gemini resultado: ' . json_encode($resultado));
@@ -190,6 +194,59 @@ class TelegramController extends Controller
             $comentario = $this->generarComentario($data);
 
             $this->sendMessage($chatId, "$comentario\n\n📊 *Resumen de {$data['periodo']}*\n\n✅ Ingresos: \$$ingresos\n❌ Gastos: \$$gastos\n💳 Saldo tarjeta: \$$saldoTarjeta\n💰 Balance: \$$balance");
+
+        } catch (\Exception $e) {
+            $this->sendMessage($chatId, "⚠️ No pude conectar con la base de datos. Verifica que el servidor esté activo e intenta de nuevo.");
+        }
+    }
+
+    // ─────────────────────────────────────────────────────
+    // RESUMEN ANUAL
+    // Consulta la API de eptech y responde con los totales del año.
+    // ─────────────────────────────────────────────────────
+
+    private function responderResumenAnual($chatId, $anio = null, $categoria = null)
+    {
+        $anio = $anio ?? now()->year;
+
+        try {
+            $params = ['anio' => $anio];
+            if ($categoria) $params['categoria'] = $categoria;
+
+            $response = Http::timeout(10)->withHeaders([
+                'X-Wanda-Token' => $this->wandaToken,
+            ])->get("{$this->wandaUrl}/api/wanda/resumen-anual", $params);
+
+            if (!$response->successful()) {
+                $this->sendMessage($chatId, "⚠️ No pude conectar con la base de datos. Verifica que el servidor esté activo e intenta de nuevo.");
+                return;
+            }
+
+            $data     = $response->json();
+            $ingresos = number_format($data['ingresos'], 2);
+            $gastos   = number_format($data['gastos'], 2);
+            $balance  = number_format($data['balance'], 2);
+
+            $comentario = $this->generarComentario([
+                'periodo'       => $categoria ? "$anio — $categoria" : "$anio",
+                'ingresos'      => $data['ingresos'],
+                'gastos'        => $data['gastos'],
+                'saldo_tarjeta' => $data['saldo_tarjeta'] ?? 0,
+                'balance'       => $data['balance'],
+            ]);
+
+            $titulo = $categoria
+                ? "📊 *Resumen anual $anio — $categoria*"
+                : "📊 *Resumen anual $anio*";
+
+            $mensaje = "$comentario\n\n$titulo\n\n✅ Ingresos: \$$ingresos\n❌ Gastos: \$$gastos\n💰 Balance: \$$balance";
+
+            if (!$categoria && isset($data['saldo_tarjeta'])) {
+                $saldoTarjeta = number_format($data['saldo_tarjeta'], 2);
+                $mensaje .= "\n💳 Saldo tarjeta: \$$saldoTarjeta";
+            }
+
+            $this->sendMessage($chatId, $mensaje);
 
         } catch (\Exception $e) {
             $this->sendMessage($chatId, "⚠️ No pude conectar con la base de datos. Verifica que el servidor esté activo e intenta de nuevo.");
