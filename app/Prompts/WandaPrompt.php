@@ -25,8 +25,7 @@ class WandaPrompt
     }
 
     Reglas:
-    - "accion" es "resumen" si el usuario quiere ver ingresos, gastos o balance de un mes específico o del mes actual
-    - "accion" es "resumen_anual" si el usuario quiere ver el resumen de todo un año
+    - "accion" es "resumen" si el usuario quiere cualquier información financiera: mensual, anual, corridas, comparaciones, etc.
     - "accion" es "nuevo_movimiento" si el usuario quiere registrar, agregar o crear un ingreso o gasto
     - "accion" es "inventario" si el usuario pregunta por stock, componentes, partes o inventario
     - "accion" es "modificar_stock" si el usuario quiere agregar o quitar unidades de un componente
@@ -70,5 +69,47 @@ class WandaPrompt
         - Gastos: \${$data['gastos']}
         - Saldo tarjeta pendiente: \${$data['saldo_tarjeta']}
         - Balance: \${$data['balance']}";
+    }
+
+    public static function herramientas(): array
+    {
+        return [
+            [
+                'name'        => 'obtener_resumen_mensual',
+                'description' => 'Obtiene el resumen financiero de un mes específico: ingresos, gastos, saldo de tarjeta y balance.',
+                'parameters'  => [
+                    'type'       => 'object',
+                    'properties' => [
+                        'mes'  => ['type' => 'integer', 'description' => 'Número del mes (1-12)'],
+                        'anio' => ['type' => 'integer', 'description' => 'Año (ejemplo: 2026)'],
+                    ],
+                    'required' => ['mes', 'anio'],
+                ],
+            ],
+            [
+                'name'        => 'obtener_resumen_anual',
+                'description' => 'Obtiene el resumen financiero de un año completo: ingresos, gastos, saldo de tarjeta y balance. Opcionalmente se puede filtrar por categoría.',
+                'parameters'  => [
+                    'type'       => 'object',
+                    'properties' => [
+                        'anio'      => ['type' => 'integer', 'description' => 'Año (ejemplo: 2026)'],
+                        'categoria' => ['type' => 'string',  'description' => 'Categoría opcional: Reparacion, Miscelaneo, Vending Machine, Electro, EPTech'],
+                    ],
+                    'required' => ['anio'],
+                ],
+            ],
+        ];
+    }
+
+    public static function sistemaFinanciero(string $fechaActual): string
+    {
+        return "Eres Wanda, un asistente financiero para un negocio de reparación electrónica. 
+    La fecha actual es $fechaActual.
+    Tienes acceso a herramientas para consultar datos financieros reales.
+    Cuando el usuario pida información financiera, usa las herramientas disponibles para obtener los datos y luego responde en español de forma clara y concisa.
+    No inventes números — siempre consulta las herramientas primero.
+    Si el usuario pide una corrida de varios meses, consulta cada mes por separado.
+    Siempre muestra los montos con el símbolo de dólar y dos decimales, ejemplo: \$1,234.56
+    Responde sin markdown ni formato especial, solo texto plano con saltos de línea.";
     }
 }

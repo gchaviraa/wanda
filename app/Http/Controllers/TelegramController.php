@@ -61,19 +61,10 @@ class TelegramController extends Controller
         $resultado = $this->preguntarGemini($texto);
         $accion    = $resultado['accion'];
 
-        // Determinar mes y año (actual por defecto, o el que extrajo Gemini)
-        $mes  = $resultado['mes'] ?? now()->month;
-        $anio = $resultado['anio'] ?? now()->year;
-
-        // Si dijo "mes pasado", calcularlo en PHP
-        if ($resultado['mes_relativo'] ?? false) {
-            $mes  = now()->subMonth()->month;
-            $anio = now()->subMonth()->year;
-        }
-
         switch ($accion) {
             case 'resumen':
-                $this->responderResumen($chatId, $mes, $anio);
+            case 'resumen_anual':
+                $this->consultarFinanciero($chatId, $texto);
                 break;
 
             case 'nuevo_movimiento':
@@ -88,6 +79,7 @@ class TelegramController extends Controller
                     $this->responderInventario($chatId, $resultado['busqueda']);
                 }
                 break;
+
             case 'modificar_stock':
                 if (empty($resultado['num_componente']) || $resultado['cantidad_stock'] === null) {
                     $this->sendMessage($chatId, "⚠️ Necesito el número de componente y la cantidad. Ejemplo: *agrega 5 al IRFB4227PBF*");
@@ -95,9 +87,7 @@ class TelegramController extends Controller
                     $this->modificarStock($chatId, $resultado['num_componente'], $resultado['cantidad_stock']);
                 }
                 break;
-            case 'resumen_anual':
-                $this->responderResumenAnual($chatId, $anio, $resultado['categoria']);
-                break;
+
             default:
                 $this->sendMessage($chatId, "👋 Hola, soy Wanda\n\nPuedo ayudarte con:\n\n📊 *Ver resumen* — ingresos y gastos del mes o del año\n📝 *Nuevo movimiento* — registrar un ingreso o gasto\n🔍 *Inventario* — buscar stock de componentes\n📦 *Modificar stock* — agregar o quitar unidades\n\n_(Escribe *cancelar* para cancelar cualquier operación)_");
         }
@@ -163,93 +153,100 @@ class TelegramController extends Controller
     }
 
     // ─────────────────────────────────────────────────────
-    // RESUMEN MENSUAL
-    // Consulta la API de eptech y responde con los totales.
+    // CONSULTA FINANCIERA CON FUNCTION CALLING
+    // Gemini decide qué datos necesita y Wanda los consulta.
     // ─────────────────────────────────────────────────────
 
-    private function responderResumen($chatId, $mes = null, $anio = null)
+    private function consultarFinanciero($chatId, $texto)
     {
-        $mes  = $mes  ?? now()->month;
-        $anio = $anio ?? now()->year;
+        $mensajes = [
+            ['role' => 'user', 'parts' => [['text' => $texto]]]
+        ];
 
-        try {
-            $response = Http::timeout(10)->withHeaders([
-                'X-Wanda-Token' => $this->wandaToken,
-            ])->get("{$this->wandaUrl}/api/wanda/resumen", [
-                'mes'  => $mes,
-                'anio' => $anio,
-            ]);
+        // Máximo 5 iteraciones para evitar loops infinitos
+        for ($i = 0; $i < 5; $i++) {
 
-            if (!$response->successful()) {
-                $this->sendMessage($chatId, "⚠️ No pude conectar con la base de datos. Verifica que el servidor esté activo e intenta de nuevo.");
+            $response = Http::timeout(30)->post(
+                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={$this->geminiKey}",
+                [
+                    'system_instruction' => ['parts' => [['text' => WandaPrompt::sistemaFinanciero(now()->format('d/m/Y'))]]],
+                    'contents'           => $mensajes,
+                    'tools'              => [['function_declarations' => WandaPrompt::herramientas()]],
+                ]
+            );
+
+            $candidate = $response->json()['candidates'][0]['content'] ?? null;
+            if (!$candidate) break;
+
+            $mensajes[] = $candidate;
+
+            $parts        = $candidate['parts'] ?? [];
+            $textoPart    = collect($parts)->first(fn($p) => isset($p['text']));
+            $funcionParts = collect($parts)->filter(fn($p) => isset($p['functionCall']));
+
+            // Si Gemini responde con texto es la respuesta final
+            if ($textoPart) {
+                $this->sendMessage($chatId, $textoPart['text']);
                 return;
             }
 
-            $data         = $response->json();
-            $ingresos     = number_format($data['ingresos'], 2);
-            $gastos       = number_format($data['gastos'], 2);
-            $saldoTarjeta = number_format($data['saldo_tarjeta'], 2);
-            $balance      = number_format($data['balance'], 2);
+            // Si hay function calls, ejecutarlas todas
+            if ($funcionParts->isNotEmpty()) {
+                $resultados = [];
 
-            $comentario = $this->generarComentario($data);
+                foreach ($funcionParts as $part) {
+                    $nombreFuncion = $part['functionCall']['name'];
+                    $args          = $part['functionCall']['args'];
+                    $resultado     = $this->ejecutarHerramienta($nombreFuncion, $args);
 
-            $this->sendMessage($chatId, "$comentario\n\n📊 *Resumen de {$data['periodo']}*\n\n✅ Ingresos: \$$ingresos\n❌ Gastos: \$$gastos\n💳 Saldo tarjeta: \$$saldoTarjeta\n💰 Balance: \$$balance");
+                    $resultados[] = [
+                        'functionResponse' => [
+                            'name'     => $nombreFuncion,
+                            'response' => $resultado,
+                        ]
+                    ];
+                }
 
-        } catch (\Exception $e) {
-            $this->sendMessage($chatId, "⚠️ No pude conectar con la base de datos. Verifica que el servidor esté activo e intenta de nuevo.");
+                // Devolver todos los resultados a Gemini en un solo mensaje
+                $mensajes[] = [
+                    'role'  => 'user',
+                    'parts' => $resultados,
+                ];
+            } else {
+                break;
+            }
         }
+
+        $this->sendMessage($chatId, "⚠️ No pude procesar tu consulta. Intenta de nuevo.");
     }
 
-    // ─────────────────────────────────────────────────────
-    // RESUMEN ANUAL
-    // Consulta la API de eptech y responde con los totales del año.
-    // ─────────────────────────────────────────────────────
-
-    private function responderResumenAnual($chatId, $anio = null, $categoria = null)
+    private function ejecutarHerramienta($nombre, $args)
     {
-        $anio = $anio ?? now()->year;
-
         try {
-            $params = ['anio' => $anio];
-            if ($categoria) $params['categoria'] = $categoria;
-
-            $response = Http::timeout(10)->withHeaders([
-                'X-Wanda-Token' => $this->wandaToken,
-            ])->get("{$this->wandaUrl}/api/wanda/resumen-anual", $params);
-
-            if (!$response->successful()) {
-                $this->sendMessage($chatId, "⚠️ No pude conectar con la base de datos. Verifica que el servidor esté activo e intenta de nuevo.");
-                return;
+            if ($nombre === 'obtener_resumen_mensual') {
+                $response = Http::timeout(10)->withHeaders([
+                    'X-Wanda-Token' => $this->wandaToken,
+                ])->get("{$this->wandaUrl}/api/wanda/resumen", [
+                    'mes'  => $args['mes'],
+                    'anio' => $args['anio'],
+                ]);
+                return $response->json();
             }
 
-            $data     = $response->json();
-            $ingresos = number_format($data['ingresos'], 2);
-            $gastos   = number_format($data['gastos'], 2);
-            $balance  = number_format($data['balance'], 2);
+            if ($nombre === 'obtener_resumen_anual') {
+                $params = ['anio' => $args['anio']];
+                if (!empty($args['categoria'])) $params['categoria'] = $args['categoria'];
 
-            $comentario = $this->generarComentario([
-                'periodo'       => $categoria ? "$anio — $categoria" : "$anio",
-                'ingresos'      => $data['ingresos'],
-                'gastos'        => $data['gastos'],
-                'saldo_tarjeta' => $data['saldo_tarjeta'] ?? 0,
-                'balance'       => $data['balance'],
-            ]);
-
-            $titulo = $categoria
-                ? "📊 *Resumen anual $anio — $categoria*"
-                : "📊 *Resumen anual $anio*";
-
-            $mensaje = "$comentario\n\n$titulo\n\n✅ Ingresos: \$$ingresos\n❌ Gastos: \$$gastos\n💰 Balance: \$$balance";
-
-            if (!$categoria && isset($data['saldo_tarjeta'])) {
-                $saldoTarjeta = number_format($data['saldo_tarjeta'], 2);
-                $mensaje .= "\n💳 Saldo tarjeta: \$$saldoTarjeta";
+                $response = Http::timeout(10)->withHeaders([
+                    'X-Wanda-Token' => $this->wandaToken,
+                ])->get("{$this->wandaUrl}/api/wanda/resumen-anual", $params);
+                return $response->json();
             }
 
-            $this->sendMessage($chatId, $mensaje);
+            return ['error' => 'Herramienta no encontrada'];
 
         } catch (\Exception $e) {
-            $this->sendMessage($chatId, "⚠️ No pude conectar con la base de datos. Verifica que el servidor esté activo e intenta de nuevo.");
+            return ['error' => $e->getMessage()];
         }
     }
 
