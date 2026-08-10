@@ -403,7 +403,7 @@ class TelegramController extends Controller
                 $cantidad = number_format($sesion['cantidad'], 2);
                 $this->sendMessage($chatId, "✅ *$tipo de \$$cantidad registrado correctamente*\n📅 Fecha: {$sesion['fecha']}");
             } else {
-                $this->sendMessage($chatId, "⚠️ No se pudo guardar el movimiento. Intenta de nuevo.");
+                $this->sendMessage($chatId, "⚠️ " . $this->extraerMensajeError($response, 'No se pudo guardar el movimiento. Intenta de nuevo.'));
             }
         } catch (\Exception $e) {
             $this->sendMessage($chatId, "⚠️ No se pudo conectar con el servidor. Intenta de nuevo.");
@@ -435,7 +435,7 @@ class TelegramController extends Controller
                 } elseif (isset($data['error']) && $data['error'] === 'Componente no encontrado') {
                     $this->sendMessage($chatId, "⚠️ No encontré el componente *$numComponente*.");
                 } else {
-                    $this->sendMessage($chatId, "⚠️ No se pudo modificar el stock. Intenta de nuevo.");
+                    $this->sendMessage($chatId, "⚠️ " . $this->extraerMensajeError($response, 'No se pudo modificar el stock. Intenta de nuevo.'));
                 }
                 return;
             }
@@ -474,6 +474,29 @@ class TelegramController extends Controller
         $data = json_decode(Storage::get('sesiones.json') ?? '{}', true);
         unset($data[$chatId]);
         Storage::put('sesiones.json', json_encode($data));
+    }
+
+    // ─────────────────────────────────────────────────────
+    // ERRORES
+    // Saca el motivo real de una respuesta fallida de la API de control
+    // general (guard personalizado con 'error', o validación estándar de
+    // Laravel con 'errors'), para no responderle siempre lo mismo al usuario.
+    // ─────────────────────────────────────────────────────
+
+    private function extraerMensajeError($response, string $default): string
+    {
+        $data = $response->json();
+
+        if (!empty($data['error'])) {
+            return $data['error'];
+        }
+
+        if (!empty($data['errors'])) {
+            $primero = collect($data['errors'])->flatten()->first();
+            if ($primero) return $primero;
+        }
+
+        return $default;
     }
 
     // ─────────────────────────────────────────────────────

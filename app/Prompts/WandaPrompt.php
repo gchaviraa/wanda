@@ -36,7 +36,7 @@ class WandaPrompt
     - "num_componente" es el número exacto del componente cuando el usuario quiere modificar stock
     - "cantidad_stock" es positivo para agregar, negativo para quitar
     - "categoria" es la categoría específica si el usuario la menciona, si no null
-    - Las categorías válidas son: Reparacion, Miscelaneo, Vending Machine, Electro, EPTech
+    - Las categorías válidas son: Reparacion, Venta, Miscelaneo, Vending Machine, Electro, EPTech, Tax Acreditable, Cargos Financieros, Gastos de Nomina
     - La fecha actual es: $fechaActual
 
     Ejemplos:
@@ -93,7 +93,7 @@ class WandaPrompt
                     'type'       => 'object',
                     'properties' => [
                         'anio'      => ['type' => 'integer', 'description' => 'Año (ejemplo: 2026)'],
-                        'categoria' => ['type' => 'string',  'description' => 'Categoría opcional: Reparacion, Miscelaneo, Vending Machine, Electro, EPTech'],
+                        'categoria' => ['type' => 'string',  'description' => 'Categoría opcional: Reparacion, Venta, Miscelaneo, Vending Machine, Electro, EPTech, Tax Acreditable, Cargos Financieros, Gastos de Nomina'],
                     ],
                     'required' => ['anio'],
                 ],
