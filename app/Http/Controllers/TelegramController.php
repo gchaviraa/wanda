@@ -105,7 +105,7 @@ class TelegramController extends Controller
         $prompt = WandaPrompt::clasificar($mensaje, now()->format('d/m/Y'));
 
         try {
-            $response = Http::timeout(10)->post(
+            $response = Http::timeout(10)->retry(3, 500)->post(
                 "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={$this->geminiKey}",
                 ['contents' => [['parts' => [['text' => $prompt]]]]]
             );
@@ -140,7 +140,7 @@ class TelegramController extends Controller
         $prompt = WandaPrompt::comentarioResumen($data);
 
         try {
-            $response = Http::timeout(10)->post(
+            $response = Http::timeout(10)->retry(3, 500)->post(
                 "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={$this->geminiKey}",
                 ['contents' => [['parts' => [['text' => $prompt]]]]]
             );
@@ -163,58 +163,64 @@ class TelegramController extends Controller
             ['role' => 'user', 'parts' => [['text' => $texto]]]
         ];
 
-        // Máximo 5 iteraciones para evitar loops infinitos
-        for ($i = 0; $i < 5; $i++) {
+        try {
+            // Máximo 5 iteraciones para evitar loops infinitos
+            for ($i = 0; $i < 5; $i++) {
 
-            $response = Http::timeout(30)->post(
-                "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={$this->geminiKey}",
-                [
-                    'system_instruction' => ['parts' => [['text' => WandaPrompt::sistemaFinanciero(now()->format('d/m/Y'))]]],
-                    'contents'           => $mensajes,
-                    'tools'              => [['function_declarations' => WandaPrompt::herramientas()]],
-                ]
-            );
+                $response = Http::timeout(30)->retry(3, 500)->post(
+                    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={$this->geminiKey}",
+                    [
+                        'system_instruction' => ['parts' => [['text' => WandaPrompt::sistemaFinanciero(now()->format('d/m/Y'))]]],
+                        'contents'           => $mensajes,
+                        'tools'              => [['function_declarations' => WandaPrompt::herramientas()]],
+                    ]
+                );
 
-            $candidate = $response->json()['candidates'][0]['content'] ?? null;
-            if (!$candidate) break;
+                $candidate = $response->json()['candidates'][0]['content'] ?? null;
+                if (!$candidate) break;
 
-            $mensajes[] = $candidate;
+                $mensajes[] = $candidate;
 
-            $parts        = $candidate['parts'] ?? [];
-            $textoPart    = collect($parts)->first(fn($p) => isset($p['text']));
-            $funcionParts = collect($parts)->filter(fn($p) => isset($p['functionCall']));
+                $parts        = $candidate['parts'] ?? [];
+                $textoPart    = collect($parts)->first(fn($p) => isset($p['text']));
+                $funcionParts = collect($parts)->filter(fn($p) => isset($p['functionCall']));
 
-            // Si Gemini responde con texto es la respuesta final
-            if ($textoPart) {
-                $this->sendMessage($chatId, $textoPart['text']);
-                return;
-            }
-
-            // Si hay function calls, ejecutarlas todas
-            if ($funcionParts->isNotEmpty()) {
-                $resultados = [];
-
-                foreach ($funcionParts as $part) {
-                    $nombreFuncion = $part['functionCall']['name'];
-                    $args          = $part['functionCall']['args'];
-                    $resultado     = $this->ejecutarHerramienta($nombreFuncion, $args);
-
-                    $resultados[] = [
-                        'functionResponse' => [
-                            'name'     => $nombreFuncion,
-                            'response' => $resultado,
-                        ]
-                    ];
+                // Si Gemini responde con texto es la respuesta final
+                if ($textoPart) {
+                    $this->sendMessage($chatId, $textoPart['text']);
+                    return;
                 }
 
-                // Devolver todos los resultados a Gemini en un solo mensaje
-                $mensajes[] = [
-                    'role'  => 'user',
-                    'parts' => $resultados,
-                ];
-            } else {
-                break;
+                // Si hay function calls, ejecutarlas todas
+                if ($funcionParts->isNotEmpty()) {
+                    $resultados = [];
+
+                    foreach ($funcionParts as $part) {
+                        $nombreFuncion = $part['functionCall']['name'];
+                        $args          = $part['functionCall']['args'];
+                        $resultado     = $this->ejecutarHerramienta($nombreFuncion, $args);
+
+                        $resultados[] = [
+                            'functionResponse' => [
+                                'name'     => $nombreFuncion,
+                                'response' => $resultado,
+                            ]
+                        ];
+                    }
+
+                    // Devolver todos los resultados a Gemini en un solo mensaje
+                    $mensajes[] = [
+                        'role'  => 'user',
+                        'parts' => $resultados,
+                    ];
+                } else {
+                    break;
+                }
             }
+        } catch (\Exception $e) {
+            logger('consultarFinanciero error: ' . $e->getMessage());
+            $this->sendMessage($chatId, "⚠️ No pude conectar con el servidor. Intenta de nuevo.");
+            return;
         }
 
         $this->sendMessage($chatId, "⚠️ No pude procesar tu consulta. Intenta de nuevo.");
@@ -240,6 +246,24 @@ class TelegramController extends Controller
                 $response = Http::timeout(10)->withHeaders([
                     'X-Wanda-Token' => $this->wandaToken,
                 ])->get("{$this->wandaUrl}/api/wanda/resumen-anual", $params);
+                return $response->json();
+            }
+
+            if ($nombre === 'obtener_cortes_mensuales') {
+                $params = [];
+                if (!empty($args['anio'])) $params['anio'] = $args['anio'];
+                if (!empty($args['mes']))  $params['mes']  = $args['mes'];
+
+                $response = Http::timeout(10)->withHeaders([
+                    'X-Wanda-Token' => $this->wandaToken,
+                ])->get("{$this->wandaUrl}/api/wanda/cortes", $params);
+                return $response->json();
+            }
+
+            if ($nombre === 'obtener_pendientes_cobro') {
+                $response = Http::timeout(10)->withHeaders([
+                    'X-Wanda-Token' => $this->wandaToken,
+                ])->get("{$this->wandaUrl}/api/wanda/pendientes-cobro");
                 return $response->json();
             }
 
