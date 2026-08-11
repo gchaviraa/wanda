@@ -89,7 +89,7 @@ class TelegramController extends Controller
                 break;
 
             default:
-                $this->sendMessage($chatId, "👋 Hola, soy Wanda\n\nPuedo ayudarte con:\n\n📊 *Ver resumen* — ingresos y gastos del mes o del año\n📝 *Nuevo movimiento* — registrar un ingreso o gasto\n🔍 *Inventario* — buscar stock de componentes\n📦 *Modificar stock* — agregar o quitar unidades\n\n_(Escribe *cancelar* para cancelar cualquier operación)_");
+                $this->sendMessage($chatId, "👋 Hola, soy Wanda\n\nPuedo ayudarte con:\n\n📊 *Ver resumen* — ingresos y gastos del mes o del año\n📅 *Cortes mensuales* — si un mes ya está cerrado y sus cifras\n💰 *Pendientes de cobro* — cuánto deben los clientes y el balance neto\n📝 *Nuevo movimiento* — registrar un ingreso o gasto\n🔍 *Inventario* — buscar stock de componentes\n📦 *Modificar stock* — agregar o quitar unidades\n\n_(Escribe *cancelar* para cancelar cualquier operación)_");
         }
 
         return response()->json(['ok' => true]);
