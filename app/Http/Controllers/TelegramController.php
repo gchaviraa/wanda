@@ -73,10 +73,10 @@ class TelegramController extends Controller
                 break;
 
             case 'inventario':
-                if (empty($resultado['busqueda'])) {
+                if (empty($resultado['busqueda']) && empty($resultado['categoria'])) {
                     $this->sendMessage($chatId, "🔍 ¿Qué componente quieres buscar?");
                 } else {
-                    $this->responderInventario($chatId, $resultado['busqueda']);
+                    $this->responderInventario($chatId, $resultado);
                 }
                 break;
 
@@ -123,6 +123,13 @@ class TelegramController extends Controller
                 'num_componente'  => $data['num_componente']  ?? null,
                 'cantidad_stock'  => $data['cantidad_stock']  ?? null,
                 'categoria'       => $data['categoria']       ?? null,
+                'subcategoria'        => $data['subcategoria']        ?? null,
+                'capacitancia_valor'  => $data['capacitancia_valor']  ?? null,
+                'capacitancia_unidad' => $data['capacitancia_unidad'] ?? null,
+                'voltaje'             => $data['voltaje']             ?? null,
+                'resistencia_valor'   => $data['resistencia_valor']   ?? null,
+                'resistencia_unidad'  => $data['resistencia_unidad']  ?? null,
+                'potencia_watts'      => $data['potencia_watts']      ?? null,
             ];
 
             //logger('Gemini resultado: ' . json_encode($resultado));
@@ -279,36 +286,56 @@ class TelegramController extends Controller
     // Busca componentes por nombre o número de parte.
     // ─────────────────────────────────────────────────────
 
-    private function responderInventario($chatId, $busqueda)
+    private function responderInventario($chatId, array $filtros)
     {
         try {
-            //logger('Buscando inventario: ' . $busqueda);
+            $params = array_filter([
+                'q'                   => $filtros['busqueda']            ?? null,
+                'categoria'           => $filtros['categoria']           ?? null,
+                'subcategoria'        => $filtros['subcategoria']        ?? null,
+                'voltaje'             => $filtros['voltaje']             ?? null,
+                'capacitancia_valor'  => $filtros['capacitancia_valor']  ?? null,
+                'capacitancia_unidad' => $filtros['capacitancia_unidad'] ?? null,
+                'resistencia_valor'   => $filtros['resistencia_valor']   ?? null,
+                'resistencia_unidad'  => $filtros['resistencia_unidad']  ?? null,
+                'potencia_watts'      => $filtros['potencia_watts']      ?? null,
+            ], fn ($v) => $v !== null && $v !== '');
+
+            //logger('Buscando inventario: ' . json_encode($params));
 
             $response = Http::timeout(10)->withHeaders([
                 'X-Wanda-Token' => $this->wandaToken,
-            ])->get("{$this->wandaUrl}/api/wanda/inventario", [
-                'q' => $busqueda,
-            ]);
+            ])->get("{$this->wandaUrl}/api/wanda/inventario", $params);
 
             //logger('Inventario status: ' . $response->status());
             //logger('Inventario body: ' . $response->body());
 
             if (!$response->successful()) {
-                $this->sendMessage($chatId, "⚠️ No pude conectar con la base de datos. Intenta de nuevo.");
+                $this->sendMessage($chatId, "⚠️ " . $this->extraerMensajeError($response, 'No pude conectar con la base de datos. Intenta de nuevo.'));
                 return;
             }
 
             $data = $response->json();
 
+            $etiqueta = $filtros['busqueda'] ?? trim(($filtros['categoria'] ?? '') . ' ' . ($filtros['subcategoria'] ?? ''));
+
             if ($data['total'] === 0) {
-                $this->sendMessage($chatId, "🔍 No encontré ningún componente para \"$busqueda\".");
+                $this->sendMessage($chatId, "🔍 No encontré ningún componente para \"$etiqueta\".");
                 return;
             }
 
-            $texto = "🔍 *Resultados para \"$busqueda\"* ({$data['total']} encontrados)\n\n";
+            $texto = "🔍 *Resultados para \"$etiqueta\"* ({$data['total']} encontrados)\n\n";
 
             foreach ($data['resultados'] as $item) {
+                $specs = $this->formatearSpecs($item);
+
                 $texto .= "📦 *{$item['componente']}*\n";
+                if (!empty($item['categoria'])) {
+                    $texto .= "Categoría: {$item['categoria']}" . (!empty($item['subcategoria']) ? " ({$item['subcategoria']})" : '') . "\n";
+                }
+                if ($specs) {
+                    $texto .= implode(' · ', $specs) . "\n";
+                }
                 $texto .= "Num: `{$item['num_componente']}`\n";
                 $texto .= "Stock: {$item['stock']} | Caja: {$item['caja_locacion']}\n";
                 $texto .= "Proveedor: {$item['proveedor']}\n";
@@ -321,6 +348,29 @@ class TelegramController extends Controller
             logger('Inventario error: ' . $e->getMessage());
             $this->sendMessage($chatId, "⚠️ No pude conectar con la base de datos. Intenta de nuevo.");
         }
+    }
+
+    private function formatearSpecs(array $item): array
+    {
+        $fmt = fn ($v) => rtrim(rtrim((string) $v, '0'), '.');
+        $simbolos = ['Ohm' => 'Ω', 'kOhm' => 'kΩ', 'MOhm' => 'MΩ'];
+
+        $specs = [];
+
+        if (!empty($item['capacitancia_valor'])) {
+            $specs[] = $fmt($item['capacitancia_valor']) . ($item['capacitancia_unidad'] ?? '');
+        }
+        if (!empty($item['voltaje'])) {
+            $specs[] = $fmt($item['voltaje']) . 'V';
+        }
+        if (!empty($item['resistencia_valor'])) {
+            $specs[] = $fmt($item['resistencia_valor']) . ($simbolos[$item['resistencia_unidad']] ?? $item['resistencia_unidad'] ?? '');
+        }
+        if (!empty($item['potencia_watts'])) {
+            $specs[] = $fmt($item['potencia_watts']) . 'W';
+        }
+
+        return $specs;
     }
 
     // ─────────────────────────────────────────────────────

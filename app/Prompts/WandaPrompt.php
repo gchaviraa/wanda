@@ -21,7 +21,14 @@ class WandaPrompt
     "busqueda": null | texto a buscar en inventario,
     "num_componente": null | número de componente exacto,
     "cantidad_stock": null | número entero (positivo para agregar, negativo para quitar),
-    "categoria": null | nombre de la categoría
+    "categoria": null | nombre de la categoría,
+    "subcategoria": null | subcategoría del componente (solo para accion=inventario),
+    "capacitancia_valor": null | número (solo para accion=inventario, capacitores),
+    "capacitancia_unidad": null | "pF" | "nF" | "uF" (solo para accion=inventario, capacitores),
+    "voltaje": null | número en volts (solo para accion=inventario, capacitores),
+    "resistencia_valor": null | número (solo para accion=inventario, resistencias),
+    "resistencia_unidad": null | "Ohm" | "kOhm" | "MOhm" (solo para accion=inventario, resistencias),
+    "potencia_watts": null | número en watts (solo para accion=inventario, resistencias)
     }
 
     Reglas:
@@ -32,27 +39,33 @@ class WandaPrompt
     - "accion" es "desconocido" si no entiendes qué quiere
     - "mes" y "anio" solo si el usuario menciona un mes o año específico, si no ponlos en null
     - "mes_relativo" es true si el usuario dice "mes pasado", "el mes anterior" o similar
-    - "busqueda" debe contener solo el término técnico a buscar, sin palabras descriptivas
+    - "busqueda" debe contener solo el término técnico a buscar, sin palabras descriptivas — úsalo cuando el usuario da un texto libre (nombre de parte, número de componente) en vez de (o además de) specs estructuradas
     - "num_componente" es el número exacto del componente cuando el usuario quiere modificar stock
     - "cantidad_stock" es positivo para agregar, negativo para quitar
-    - "categoria" es la categoría específica si el usuario la menciona, si no null
-    - Las categorías válidas son: Reparacion, Venta, Miscelaneo, Vending Machine, Electro, EPTech, Tax Acreditable, Cargos Financieros, Gastos de Nomina
+    - "categoria" tiene DOS significados distintos según la acción — nunca se usan juntos:
+        - Si accion="resumen_anual": es una categoría FINANCIERA. Válidas: Reparacion, Venta, Miscelaneo, Vending Machine, Electro, EPTech, Tax Acreditable, Cargos Financieros, Gastos de Nomina
+        - Si accion="inventario": es un TIPO DE COMPONENTE. Válidas: Capacitor, Resistencia, Transistor, IC, Diodo, Conector, Inductor, Otro
+    - Para accion="inventario", cuando el usuario mencione specs de un capacitor o resistencia, extráelas en los campos correspondientes en vez de (o además de) meterlas en "busqueda":
+        - "microfaradios"/"uF"/"µF" → capacitancia_unidad="uF"; "nanofaradios"/"nF" → "nF"; "picofaradios"/"pF" → "pF"
+        - un número seguido de "V" o "volts" en contexto de capacitor → voltaje
+        - "ohms"/"Ω" → resistencia_unidad="Ohm"; "kilohms"/"kΩ"/"K" → "kOhm"; "megaohms"/"MΩ"/"M" → "MOhm"
+        - un número seguido de "W"/"watts" en contexto de resistencia → potencia_watts
     - La fecha actual es: $fechaActual
 
     Ejemplos:
-    - "cómo vamos este mes" → {"accion":"resumen","mes":null,"anio":null,"mes_relativo":false,"busqueda":null,"num_componente":null,"cantidad_stock":null,"categoria":null}
-    - "resumen de abril" → {"accion":"resumen","mes":4,"anio":2026,"mes_relativo":false,"busqueda":null,"num_componente":null,"cantidad_stock":null,"categoria":null}
-    - "resumen del año" → {"accion":"resumen_anual","mes":null,"anio":2026,"mes_relativo":false,"busqueda":null,"num_componente":null,"cantidad_stock":null,"categoria":null}
-    - "resumen anual 2025" → {"accion":"resumen_anual","mes":null,"anio":2025,"mes_relativo":false,"busqueda":null,"num_componente":null,"cantidad_stock":null,"categoria":null}
-    - "resumen anual de reparaciones" → {"accion":"resumen_anual","mes":null,"anio":2026,"mes_relativo":false,"busqueda":null,"num_componente":null,"cantidad_stock":null,"categoria":"Reparacion"}
-    - "cómo van las reparaciones este año" → {"accion":"resumen_anual","mes":null,"anio":2026,"mes_relativo":false,"busqueda":null,"num_componente":null,"cantidad_stock":null,"categoria":"Reparacion"}
-    - "cuántos 10uF 100V tenemos" → {"accion":"inventario","mes":null,"anio":null,"mes_relativo":false,"busqueda":"10uF 100V","num_componente":null,"cantidad_stock":null,"categoria":null}
-    - "agrega 5 al IRFB4227PBF" → {"accion":"modificar_stock","mes":null,"anio":null,"mes_relativo":false,"busqueda":null,"num_componente":"IRFB4227PBF","cantidad_stock":5,"categoria":null}
-    - "quita 2 del UKL2A100MPD1AA" → {"accion":"modificar_stock","mes":null,"anio":null,"mes_relativo":false,"busqueda":null,"num_componente":"UKL2A100MPD1AA","cantidad_stock":-2,"categoria":null}
-    - "quiero registrar un gasto" → {"accion":"nuevo_movimiento","mes":null,"anio":null,"mes_relativo":false,"busqueda":null,"num_componente":null,"cantidad_stock":null,"categoria":null}
-    - "¿ya cerraste junio?" → {"accion":"resumen","mes":6,"anio":2026,"mes_relativo":false,"busqueda":null,"num_componente":null,"cantidad_stock":null,"categoria":null}
-    - "cuánto nos deben" → {"accion":"resumen","mes":null,"anio":null,"mes_relativo":false,"busqueda":null,"num_componente":null,"cantidad_stock":null,"categoria":null}
-    - "cuál es el balance neto" → {"accion":"resumen","mes":null,"anio":null,"mes_relativo":false,"busqueda":null,"num_componente":null,"cantidad_stock":null,"categoria":null}
+    - "cómo vamos este mes" → {"accion":"resumen","mes":null,"anio":null,"mes_relativo":false,"busqueda":null,"num_componente":null,"cantidad_stock":null,"categoria":null,"subcategoria":null,"capacitancia_valor":null,"capacitancia_unidad":null,"voltaje":null,"resistencia_valor":null,"resistencia_unidad":null,"potencia_watts":null}
+    - "resumen de abril" → {"accion":"resumen","mes":4,"anio":2026,"mes_relativo":false,"busqueda":null,"num_componente":null,"cantidad_stock":null,"categoria":null,"subcategoria":null,"capacitancia_valor":null,"capacitancia_unidad":null,"voltaje":null,"resistencia_valor":null,"resistencia_unidad":null,"potencia_watts":null}
+    - "resumen del año" → {"accion":"resumen_anual","mes":null,"anio":2026,"mes_relativo":false,"busqueda":null,"num_componente":null,"cantidad_stock":null,"categoria":null,"subcategoria":null,"capacitancia_valor":null,"capacitancia_unidad":null,"voltaje":null,"resistencia_valor":null,"resistencia_unidad":null,"potencia_watts":null}
+    - "resumen anual de reparaciones" → {"accion":"resumen_anual","mes":null,"anio":2026,"mes_relativo":false,"busqueda":null,"num_componente":null,"cantidad_stock":null,"categoria":"Reparacion","subcategoria":null,"capacitancia_valor":null,"capacitancia_unidad":null,"voltaje":null,"resistencia_valor":null,"resistencia_unidad":null,"potencia_watts":null}
+    - "cuántos 10uF 100V tenemos" → {"accion":"inventario","mes":null,"anio":null,"mes_relativo":false,"busqueda":null,"num_componente":null,"cantidad_stock":null,"categoria":"Capacitor","subcategoria":null,"capacitancia_valor":10,"capacitancia_unidad":"uF","voltaje":100,"resistencia_valor":null,"resistencia_unidad":null,"potencia_watts":null}
+    - "tienes resistencias de 10K de 1/4 de watt" → {"accion":"inventario","mes":null,"anio":null,"mes_relativo":false,"busqueda":null,"num_componente":null,"cantidad_stock":null,"categoria":"Resistencia","subcategoria":null,"capacitancia_valor":null,"capacitancia_unidad":null,"voltaje":null,"resistencia_valor":10,"resistencia_unidad":"kOhm","potencia_watts":0.25}
+    - "cuántos capacitores electrolíticos tenemos" → {"accion":"inventario","mes":null,"anio":null,"mes_relativo":false,"busqueda":null,"num_componente":null,"cantidad_stock":null,"categoria":"Capacitor","subcategoria":"Electrolítico","capacitancia_valor":null,"capacitancia_unidad":null,"voltaje":null,"resistencia_valor":null,"resistencia_unidad":null,"potencia_watts":null}
+    - "busca el IRFB4227PBF" → {"accion":"inventario","mes":null,"anio":null,"mes_relativo":false,"busqueda":"IRFB4227PBF","num_componente":null,"cantidad_stock":null,"categoria":null,"subcategoria":null,"capacitancia_valor":null,"capacitancia_unidad":null,"voltaje":null,"resistencia_valor":null,"resistencia_unidad":null,"potencia_watts":null}
+    - "agrega 5 al IRFB4227PBF" → {"accion":"modificar_stock","mes":null,"anio":null,"mes_relativo":false,"busqueda":null,"num_componente":"IRFB4227PBF","cantidad_stock":5,"categoria":null,"subcategoria":null,"capacitancia_valor":null,"capacitancia_unidad":null,"voltaje":null,"resistencia_valor":null,"resistencia_unidad":null,"potencia_watts":null}
+    - "quita 2 del UKL2A100MPD1AA" → {"accion":"modificar_stock","mes":null,"anio":null,"mes_relativo":false,"busqueda":null,"num_componente":"UKL2A100MPD1AA","cantidad_stock":-2,"categoria":null,"subcategoria":null,"capacitancia_valor":null,"capacitancia_unidad":null,"voltaje":null,"resistencia_valor":null,"resistencia_unidad":null,"potencia_watts":null}
+    - "quiero registrar un gasto" → {"accion":"nuevo_movimiento","mes":null,"anio":null,"mes_relativo":false,"busqueda":null,"num_componente":null,"cantidad_stock":null,"categoria":null,"subcategoria":null,"capacitancia_valor":null,"capacitancia_unidad":null,"voltaje":null,"resistencia_valor":null,"resistencia_unidad":null,"potencia_watts":null}
+    - "¿ya cerraste junio?" → {"accion":"resumen","mes":6,"anio":2026,"mes_relativo":false,"busqueda":null,"num_componente":null,"cantidad_stock":null,"categoria":null,"subcategoria":null,"capacitancia_valor":null,"capacitancia_unidad":null,"voltaje":null,"resistencia_valor":null,"resistencia_unidad":null,"potencia_watts":null}
+    - "cuánto nos deben" → {"accion":"resumen","mes":null,"anio":null,"mes_relativo":false,"busqueda":null,"num_componente":null,"cantidad_stock":null,"categoria":null,"subcategoria":null,"capacitancia_valor":null,"capacitancia_unidad":null,"voltaje":null,"resistencia_valor":null,"resistencia_unidad":null,"potencia_watts":null}
 
     Mensaje del usuario: "$mensaje"
 
