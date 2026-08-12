@@ -186,7 +186,7 @@ class TelegramController extends Controller
                 $candidate = $response->json()['candidates'][0]['content'] ?? null;
                 if (!$candidate) break;
 
-                $mensajes[] = $candidate;
+                $mensajes[] = $this->normalizarFunctionCallArgs($candidate);
 
                 $parts        = $candidate['parts'] ?? [];
                 $textoPart    = collect($parts)->first(fn($p) => isset($p['text']));
@@ -231,6 +231,30 @@ class TelegramController extends Controller
         }
 
         $this->sendMessage($chatId, "⚠️ No pude procesar tu consulta. Intenta de nuevo.");
+    }
+
+    /**
+     * Cuando Gemini llama una herramienta sin parámetros (ej.
+     * obtener_pendientes_cobro), regresa "args": {} en su respuesta. PHP
+     * decodifica ese objeto vacío como un arreglo [], y al reenviarlo tal
+     * cual en el siguiente turno de la conversación, json_encode lo vuelve
+     * a mandar como [] (arreglo) en vez de {} (objeto) — Gemini rechaza esa
+     * forma con un 400 "Unknown name args". Aquí se fuerza de vuelta a
+     * objeto antes de reenviarlo.
+     */
+    private function normalizarFunctionCallArgs(array $candidate): array
+    {
+        if (empty($candidate['parts'])) {
+            return $candidate;
+        }
+
+        foreach ($candidate['parts'] as $i => $part) {
+            if (isset($part['functionCall']['args']) && is_array($part['functionCall']['args']) && empty($part['functionCall']['args'])) {
+                $candidate['parts'][$i]['functionCall']['args'] = (object) [];
+            }
+        }
+
+        return $candidate;
     }
 
     private function ejecutarHerramienta($nombre, $args)
