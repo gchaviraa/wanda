@@ -69,7 +69,7 @@ class TelegramController extends Controller
 
             case 'nuevo_movimiento':
                 $this->setSesion($chatId, ['flujo' => 'nuevo_movimiento', 'paso' => 'tipo']);
-                $this->sendMessage($chatId, "📝 *Nuevo movimiento*\n\n¿Qué tipo es?\n\nEscribe *ingreso*, *gasto* o *pago_tarjeta*\n\n_(Escribe *cancelar* en cualquier momento para salir)_");
+                $this->sendMessage($chatId, "📝 *Nuevo movimiento*\n\n¿Qué tipo es?\n\nEscribe *ingreso*, *gasto*, *pago_tarjeta*, *transferencia_savings* o *retiro_savings*\n\n_(Escribe *cancelar* en cualquier momento para salir)_");
                 break;
 
             case 'inventario':
@@ -409,8 +409,8 @@ class TelegramController extends Controller
         switch ($sesion['paso']) {
             case 'tipo':
                 $tipo = strtolower($texto);
-                if (!in_array($tipo, ['ingreso', 'gasto', 'pago_tarjeta'])) {
-                    $this->sendMessage($chatId, "⚠️ Escribe *ingreso*, *gasto* o *pago_tarjeta*.");
+                if (!in_array($tipo, ['ingreso', 'gasto', 'pago_tarjeta', 'transferencia_savings', 'retiro_savings'])) {
+                    $this->sendMessage($chatId, "⚠️ Escribe *ingreso*, *gasto*, *pago_tarjeta*, *transferencia_savings* o *retiro_savings*.");
                     return;
                 }
                 $sesion['tipo'] = $tipo;
@@ -433,8 +433,10 @@ class TelegramController extends Controller
             case 'descripcion':
                 $sesion['descripcion'] = $omitir ? null : $texto;
 
-                // pago_tarjeta no tiene categoría, subcategoría ni proyecto
-                if ($sesion['tipo'] === 'pago_tarjeta') {
+                // pago_tarjeta y los movimientos de Savings son "internos": no
+                // tienen categoría, subcategoría, proyecto ni método de pago
+                // (mismo criterio que el formulario web — esInterno).
+                if (in_array($sesion['tipo'], ['pago_tarjeta', 'transferencia_savings', 'retiro_savings'])) {
                     $sesion['paso'] = 'fecha';
                     $this->setSesion($chatId, $sesion);
                     $this->sendMessage($chatId, "📅 ¿Fecha? Escribe *hoy* o una fecha (ejemplo: 2026-05-15)");
@@ -461,7 +463,23 @@ class TelegramController extends Controller
 
             case 'proyecto':
                 $sesion['proyecto'] = $omitir ? null : $texto;
-                $sesion['paso']     = 'fecha';
+                $sesion['paso']     = 'metodo_pago';
+                $this->setSesion($chatId, $sesion);
+                $this->sendMessage($chatId, "💳 ¿Método de pago? Escribe *debito*, *credito*, o *omitir*");
+                break;
+
+            case 'metodo_pago':
+                if ($omitir) {
+                    $sesion['metodo_pago'] = null;
+                } else {
+                    $metodo = ucfirst(strtolower($texto));
+                    if (!in_array($metodo, ['Debito', 'Credito'])) {
+                        $this->sendMessage($chatId, "⚠️ Escribe *debito*, *credito*, o *omitir*.");
+                        return;
+                    }
+                    $sesion['metodo_pago'] = $metodo;
+                }
+                $sesion['paso'] = 'fecha';
                 $this->setSesion($chatId, $sesion);
                 $this->sendMessage($chatId, "📅 ¿Fecha? Escribe *hoy* o una fecha (ejemplo: 2026-05-15)");
                 break;
@@ -494,6 +512,7 @@ class TelegramController extends Controller
                 'categoria'    => $sesion['categoria']    ?? null,
                 'subcategoria' => $sesion['subcategoria'] ?? null,
                 'proyecto'     => $sesion['proyecto']     ?? null,
+                'metodo_pago'  => $sesion['metodo_pago']  ?? null,
             ]);
 
             if ($response->successful()) {
